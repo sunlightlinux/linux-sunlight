@@ -24,6 +24,8 @@
 #include <linux/sysctl.h>
 #include <linux/nodemask.h>
 
+#include <asm/topology.h>
+
 static DEFINE_MUTEX(itmt_update_mutex);
 DEFINE_PER_CPU_READ_MOSTLY(int, sched_core_priority);
 
@@ -170,10 +172,15 @@ int arch_asym_cpu_priority(int cpu)
 	return per_cpu(sched_core_priority, cpu);
 }
 
+extern int best_core;
+extern int second_best_core;
+static int best_core_score;
+static int second_best_core_score;
+
 /**
  * sched_set_itmt_core_prio() - Set CPU priority based on ITMT
- * @prio:	Priority of @cpu
- * @cpu:	The CPU number
+ * @prio:	Priority of @core_cpu
+ * @core_cpu:	The CPU number
  *
  * The pstate driver will find out the max boost frequency
  * and call this function to set a priority proportional
@@ -184,7 +191,29 @@ int arch_asym_cpu_priority(int cpu)
  * the CPU priorities. The sched domains have no
  * dependency on CPU priorities.
  */
-void sched_set_itmt_core_prio(int prio, int cpu)
+void sched_set_itmt_core_prio(int prio, int core_cpu)
 {
-	per_cpu(sched_core_priority, cpu) = prio;
+	int cpu, i = 1;
+
+	for_each_cpu(cpu, topology_sibling_cpumask(core_cpu)) {
+		int smt_prio;
+
+		/*
+		 * Ensure that the siblings are moved to the end
+		 * of the priority chain and only used when
+		 * all other high priority cpus are out of capacity.
+		 */
+		smt_prio = prio * __max_threads_per_core / (i * i);
+		per_cpu(sched_core_priority, cpu) = smt_prio;
+		i++;
+
+		if (smt_prio > best_core_score) {
+			best_core = cpu;
+			best_core_score = smt_prio;
+		} else
+		if (smt_prio > second_best_core_score) {
+			second_best_core = cpu;
+			second_best_core_score = smt_prio;
+		}
+	}
 }
