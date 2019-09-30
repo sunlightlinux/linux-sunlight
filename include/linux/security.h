@@ -561,6 +561,7 @@ int security_inode_notifysecctx(struct inode *inode, void *ctx, u32 ctxlen);
 int security_inode_setsecctx(struct dentry *dentry, void *ctx, u32 ctxlen);
 int security_inode_getsecctx(struct inode *inode, struct lsmcontext *cp);
 int security_locked_down(enum lockdown_reason what);
+int security_lock_kernel_down(const char *where, enum lockdown_reason level);
 int lsm_fill_user_ctx(struct lsm_ctx __user *uctx, u32 *uctx_len,
 		      void *val, size_t val_len, u64 id, u64 flags);
 #else /* CONFIG_SECURITY */
@@ -1551,6 +1552,10 @@ static inline int lsm_fill_user_ctx(struct lsm_ctx __user *uctx,
 				    u64 id, u64 flags)
 {
 	return -EOPNOTSUPP;
+}
+static inline int security_lock_kernel_down(const char *where, enum lockdown_reason level)
+{
+	return 0;
 }
 #endif	/* CONFIG_SECURITY */
 
