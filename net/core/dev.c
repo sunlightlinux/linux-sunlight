@@ -10679,7 +10679,7 @@ static struct net_device *netdev_wait_allrefs_any(struct list_head *list)
 		if (time_after(jiffies, warning_time +
 			       READ_ONCE(netdev_unregister_timeout_secs) * HZ)) {
 			list_for_each_entry(dev, list, todo_list) {
-				pr_emerg("unregister_netdevice: waiting for %s to become free. Usage count = %d\n",
+				pr_err("unregister_netdevice: waiting for %s to become free. Usage count = %d\n",
 					 dev->name, netdev_refcnt_read(dev));
 				ref_tracker_dir_print(&dev->refcnt_tracker, 10);
 			}
