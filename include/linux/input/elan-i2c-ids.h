@@ -74,6 +74,18 @@ static const struct acpi_device_id elan_acpi_id[] = {
 	{ "ELAN0636", 0 }, /* Lenovo V1415-Dali */
 	{ "ELAN0637", 0 }, /* Lenovo V1415-IGLR */
 	{ "ELAN1000", 0 },
+	{ "ELAN1200", 0 },
+	{ "ELAN1201", 0 },
+	{ "ELAN1202", 0 },
+	{ "ELAN1203", 0 },
+	{ "ELAN12A6", 0 },
+	{ "ELAN1300", 0 },
+	{ "ELAN1301", 0 },
+	{ "ELAN2200", 0 },
+	{ "ELAN2201", 0 },
+	{ "ELAN2202", 0 },
+	{ "ELAN2300", 0 },
+	{ "ELAN2301", 0 },
 	{ }
 };
 
