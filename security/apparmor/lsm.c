@@ -29,6 +29,7 @@
 #include <uapi/linux/lsm.h>
 
 #include "include/af_unix.h"
+#include "include/af_inet.h"
 #include "include/apparmor.h"
 #include "include/apparmorfs.h"
 #include "include/audit.h"
@@ -1406,6 +1407,9 @@ static int apparmor_socket_create(int family, int type, int protocol, int kern)
 	int error = 0;
 
 	AA_BUG(in_interrupt());
+
+	if (kern)
+		return 0;
 
 	label = begin_current_label_crit_section();
 	if (!(kern || unconfined(label)))
