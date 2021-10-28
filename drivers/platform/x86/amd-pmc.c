@@ -534,22 +534,22 @@ static int amd_pmc_probe(struct platform_device *pdev)
 
 	rdev = pci_get_domain_bus_and_slot(0, 0, PCI_DEVFN(0, 0));
 	if (!rdev || !pci_match_id(pmc_pci_ids, rdev)) {
-		pci_dev_put(rdev);
-		return -ENODEV;
+		err = -ENODEV;
+		goto err_pci_dev_put;
 	}
 
 	dev->cpu_id = rdev->device;
 	err = pci_write_config_dword(rdev, AMD_PMC_SMU_INDEX_ADDRESS, AMD_PMC_BASE_ADDR_LO);
 	if (err) {
 		dev_err(dev->dev, "error writing to 0x%x\n", AMD_PMC_SMU_INDEX_ADDRESS);
-		pci_dev_put(rdev);
-		return pcibios_err_to_errno(err);
+		err = pcibios_err_to_errno(err);
+		goto err_pci_dev_put;
 	}
 
 	err = pci_read_config_dword(rdev, AMD_PMC_SMU_INDEX_DATA, &val);
 	if (err) {
-		pci_dev_put(rdev);
-		return pcibios_err_to_errno(err);
+		err = pcibios_err_to_errno(err);
+		goto err_pci_dev_put;
 	}
 
 	base_addr_lo = val & AMD_PMC_BASE_ADDR_HI_MASK;
@@ -557,14 +557,14 @@ static int amd_pmc_probe(struct platform_device *pdev)
 	err = pci_write_config_dword(rdev, AMD_PMC_SMU_INDEX_ADDRESS, AMD_PMC_BASE_ADDR_HI);
 	if (err) {
 		dev_err(dev->dev, "error writing to 0x%x\n", AMD_PMC_SMU_INDEX_ADDRESS);
-		pci_dev_put(rdev);
-		return pcibios_err_to_errno(err);
+		err = pcibios_err_to_errno(err);
+		goto err_pci_dev_put;
 	}
 
 	err = pci_read_config_dword(rdev, AMD_PMC_SMU_INDEX_DATA, &val);
 	if (err) {
-		pci_dev_put(rdev);
-		return pcibios_err_to_errno(err);
+		err = pcibios_err_to_errno(err);
+		goto err_pci_dev_put;
 	}
 
 	base_addr_hi = val & AMD_PMC_BASE_ADDR_LO_MASK;
@@ -595,6 +595,10 @@ static int amd_pmc_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, dev);
 	amd_pmc_dbgfs_register(dev);
 	return 0;
+
+err_pci_dev_put:
+	pci_dev_put(rdev);
+	return err;
 }
 
 static int amd_pmc_remove(struct platform_device *pdev)
