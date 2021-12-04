@@ -1,5 +1,6 @@
 . ${ROOT_DIR}/${KERNEL_DIR}/build.config.constants
 
+BRANCH=5.15
 KMI_GENERATION=5
 
 LLVM=1
