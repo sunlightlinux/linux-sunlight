@@ -1,7 +1,7 @@
 # If we ever add another OWNERS above this directory, it's likely to be
 # more permissive, so don't inherit from it
 set noparent
-include kernel/common:android-mainline:/OWNERS_DrNo
+include kernel/common:5.15:/OWNERS_DrNo
 
 # Downstream boards maintained directly in this manifest branch
 per-file abi_gki_aarch64_cuttlefish = adelva@google.com, rammuthiah@google.com
