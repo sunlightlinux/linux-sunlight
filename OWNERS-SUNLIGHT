@@ -1,0 +1,3 @@
+# include OWNERS from the authoritative 5.18 branch
+include linux-sunlight:5.18:/OWNERS-SUNLIGHT
+include linux-sunlight:5.18:/sunlight/OWNERS
