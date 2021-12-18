@@ -1,0 +1,7 @@
+# If we ever add another OWNERS above this directory, it's likely to be
+# more permissive, so don't inherit from it
+set noparent
+include linux-sunlight:5.15:/OWNERS
+
+# Downstream configuration maintained directly in this 5.15 branch
+per-file gcc/config-sunlight-lowlatency = ionut_n2001@yahoo.com
