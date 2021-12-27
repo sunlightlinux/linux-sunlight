@@ -540,6 +540,9 @@ LINUXINCLUDE    := \
 		-I$(objtree)/include \
 		$(USERINCLUDE)
 
+# SUNLIGHT: Include our third party driver stuff too
+LINUXINCLUDE   += -I$(srctree)/sunlight/include
+
 KBUILD_AFLAGS   := -D__ASSEMBLY__ -fno-PIE
 KBUILD_CFLAGS   := -Wall -Wundef -Werror=strict-prototypes -Wno-trigraphs \
 		   -fno-strict-aliasing -fno-common -fshort-wchar -fno-PIE \
@@ -695,7 +698,7 @@ endif
 ifeq ($(KBUILD_EXTMOD),)
 # Objects we will link into vmlinux / subdirs we need to visit
 core-y		:= init/ usr/ arch/$(SRCARCH)/
-drivers-y	:= drivers/ sound/
+drivers-y	:= drivers/ sound/ sunlight/
 drivers-$(CONFIG_SAMPLES) += samples/
 drivers-$(CONFIG_NET) += net/
 drivers-y	+= virt/
@@ -1159,6 +1162,7 @@ ifeq ($(KBUILD_EXTMOD),)
 endif
 	$(Q)$(MAKE) $(hdr-inst)=$(hdr-prefix)include/uapi
 	$(Q)$(MAKE) $(hdr-inst)=$(hdr-prefix)arch/$(SRCARCH)/include/uapi
+	$(Q)$(MAKE) $(hdr-inst)=$(hdr-prefix)sunlight/include dst=include oldheaders=
 
 ifeq ($(KBUILD_EXTMOD),)
 core-y			+= kernel/ certs/ mm/ fs/ ipc/ security/ crypto/

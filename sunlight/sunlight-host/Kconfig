@@ -1,0 +1,5 @@
+config SUNLIGHT_HOST
+	tristate "proc dir for exporting host data to containers"
+	help
+	  Creates an sunlight-host directory in proc for providing data from
+	  Sunlight hosts to containers.
