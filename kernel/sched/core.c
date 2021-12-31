@@ -4745,6 +4745,9 @@ static void __sched_fork(unsigned long clone_flags, struct task_struct *p)
 	p->se.slice			= sysctl_sched_base_slice;
 	p->se.dur_avg			= 0;
 	p->se.prev_sleep_sum_runtime	= 0;
+#ifdef CONFIG_IPC_CLASSES
+	p->ipcc				= IPC_CLASS_UNCLASSIFIED;
+#endif
 	INIT_LIST_HEAD(&p->se.group_node);
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
