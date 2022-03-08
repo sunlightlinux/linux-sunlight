@@ -518,13 +518,6 @@ CFLAGS_KERNEL	=
 AFLAGS_KERNEL	=
 LDFLAGS_vmlinux =
 
-# Prefer linux-backports-modules
-ifneq ($(KBUILD_SRC),)
-ifneq ($(shell if test -e $(KBUILD_OUTPUT)/sunlight-build; then echo yes; fi),yes)
-SUNLIGHTINCLUDE := -I/usr/src/linux-headers-lbm-$(KERNELRELEASE)
-endif
-endif
-
 # Use USERINCLUDE when you must reference the UAPI directories only.
 USERINCLUDE    := \
 		-I$(srctree)/arch/$(SRCARCH)/include/uapi \
@@ -537,7 +530,6 @@ USERINCLUDE    := \
 # Use LINUXINCLUDE when you must reference the include/ directory.
 # Needed to be compatible with the O= option
 LINUXINCLUDE    := \
-		$(SUNLIGHTINCLUDE) \
 		-I$(srctree)/arch/$(SRCARCH)/include \
 		-I$(objtree)/arch/$(SRCARCH)/include/generated \
 		$(if $(building_out_of_srctree),-I$(srctree)/include) \
@@ -545,7 +537,7 @@ LINUXINCLUDE    := \
 		$(USERINCLUDE)
 
 # SUNLIGHT: Include our third party driver stuff too
-LINUXINCLUDE   += -Isunlight/include $(if $(KBUILD_SRC),-I$(srctree)/sunlight/include)
+LINUXINCLUDE   += -I$(srctree)/sunlight/include
 
 KBUILD_AFLAGS   := -D__ASSEMBLY__ -fno-PIE
 KBUILD_CFLAGS   := -Wall -Wundef -Werror=strict-prototypes -Wno-trigraphs \
@@ -1159,7 +1151,7 @@ ifeq ($(KBUILD_EXTMOD),)
 endif
 	$(Q)$(MAKE) $(hdr-inst)=$(hdr-prefix)include/uapi
 	$(Q)$(MAKE) $(hdr-inst)=$(hdr-prefix)arch/$(SRCARCH)/include/uapi
-	$(Q)$(MAKE) $(hdr-inst)=sunlight/include dst=include oldheaders=
+	$(Q)$(MAKE) $(hdr-inst)=$(hdr-prefix)sunlight/include dst=include oldheaders=
 
 ifeq ($(KBUILD_EXTMOD),)
 core-y			+= kernel/ certs/ mm/ fs/ ipc/ security/ crypto/
