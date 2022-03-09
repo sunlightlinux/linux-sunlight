@@ -5,7 +5,7 @@
 
 choice
 	prompt "Timer frequency"
-	default HZ_250
+	default HZ_858
 	help
 	 Allows the configuration of the timer frequency. It is customary
 	 to have the timer interrupt run at 1000 Hz but 100 Hz may be more
@@ -45,6 +45,13 @@ choice
 	help
 	 417 Hz is alternative to 300 Hz. Choose 417 Hz
 	 if you prefer performance over latency.
+
+	config HZ_500
+		bool "500 HZ"
+	help
+	 500 Hz is a balanced timer frequency. Provides fast interactivity
+	 on desktops with great smoothness without increasing CPU power
+	 consumption and sacrificing the battery life on laptops.
 
 	config HZ_833
 		bool "833 HZ"
@@ -103,6 +110,7 @@ config HZ
 	default 250 if HZ_250
 	default 300 if HZ_300
 	default 417 if HZ_417
+	default 500 if HZ_500
 	default 833 if HZ_833
 	default 858 if HZ_858
 	default 1000 if HZ_1000
