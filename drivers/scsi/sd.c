@@ -2848,7 +2848,7 @@ defaults:
 				"Assuming drive cache: write back\n");
 		sdkp->WCE = 1;
 	} else {
-		sd_first_printk(KERN_ERR, sdkp,
+		sd_first_printk(KERN_NOTICE, sdkp,
 				"Assuming drive cache: write through\n");
 		sdkp->WCE = 0;
 	}
