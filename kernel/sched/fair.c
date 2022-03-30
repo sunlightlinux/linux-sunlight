@@ -131,8 +131,8 @@ static unsigned int normalized_sysctl_sched_wakeup_granularity	= 1000000UL;
 const_debug unsigned int sysctl_sched_migration_cost	= 500000UL;
 
 #ifdef CONFIG_SCHED_BORE
-	unsigned short sysctl_sched_burst_penalty_scale = 1176;
-	unsigned char  sysctl_sched_burst_reduction_bits = 6;
+unsigned short __read_mostly sysctl_sched_burst_penalty_scale = 1176;
+unsigned char  __read_mostly sysctl_sched_burst_reduction_bits_deq = 3;
 #endif // CONFIG_SCHED_BORE
 
 int sched_thermal_decay_shift;
@@ -926,7 +926,7 @@ static void update_curr(struct cfs_rq *cfs_rq)
 		  ? logbt : 1))) >> 54)) * sysctl_sched_burst_penalty_scale) >> 20;
 		curr->vruntime += mul_u64_u32_shr(
 			calc_delta_fair(delta_exec, curr),
-			sched_prio_to_wmult[min(burst_score, 39)], 22);
+			sched_prio_to_wmult[min(burst_score, (u32)39)], 22);
 	}
 	else
 #endif // CONFIG_SCHED_BORE
@@ -5826,7 +5826,7 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 		cfs_rq = cfs_rq_of(se);
 		dequeue_entity(cfs_rq, se, flags);
 #ifdef CONFIG_SCHED_BORE
-		se->burst_time >>= sysctl_sched_burst_reduction_bits;
+		se->burst_time >>= sysctl_sched_burst_reduction_bits_deq;
 #endif // CONFIG_SCHED_BORE
 
 		cfs_rq->h_nr_running--;
@@ -7538,7 +7538,7 @@ static void yield_task_fair(struct rq *rq)
 	struct cfs_rq *cfs_rq = task_cfs_rq(curr);
 	struct sched_entity *se = &curr->se;
 #ifdef CONFIG_SCHED_BORE
-	se->burst_time >>= sysctl_sched_burst_reduction_bits;
+	se->burst_time >>= sysctl_sched_burst_reduction_bits_deq;
 #endif // CONFIG_SCHED_BORE
 
 	/*
