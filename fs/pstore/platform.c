@@ -698,7 +698,7 @@ static void decompress_record(struct pstore_record *record)
 	ret = crypto_comp_decompress(tfm, record->buf, record->size,
 					  workspace, &unzipped_len);
 	if (ret) {
-		pr_err("crypto_comp_decompress failed, ret = %d!\n", ret);
+		pr_warn("crypto_comp_decompress failed, ret = %d!\n", ret);
 		kfree(workspace);
 		return;
 	}
