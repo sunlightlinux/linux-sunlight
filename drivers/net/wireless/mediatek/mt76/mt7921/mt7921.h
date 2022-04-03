@@ -327,9 +327,6 @@ static inline bool mt7921_dma_need_reinit(struct mt7921_dev *dev)
 int mt7921_mac_init(struct mt7921_dev *dev);
 bool mt7921_mac_wtbl_update(struct mt7921_dev *dev, int idx, u32 mask);
 void mt7921_mac_reset_counters(struct mt7921_phy *phy);
-void mt7921_mac_write_txwi(struct mt7921_dev *dev, __le32 *txwi,
-			   struct sk_buff *skb, struct mt76_wcid *wcid,
-			   struct ieee80211_key_conf *key, bool beacon);
 void mt7921_mac_set_timing(struct mt7921_phy *phy);
 int mt7921_mac_fill_rx(struct mt7921_dev *dev, struct sk_buff *skb);
 void mt7921_mac_fill_rx_vector(struct mt7921_dev *dev, struct sk_buff *skb);

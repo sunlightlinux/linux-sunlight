@@ -806,9 +806,11 @@ static void mt7921_update_txs(struct mt76_wcid *wcid, __le32 *txwi)
 			       FIELD_PREP(MT_TXD5_PID, pid));
 }
 
-void mt7921_mac_write_txwi(struct mt7921_dev *dev, __le32 *txwi,
-			   struct sk_buff *skb, struct mt76_wcid *wcid,
-			   struct ieee80211_key_conf *key, bool beacon)
+static void
+mt7921_mac_write_txwi(struct mt7921_dev *dev, __le32 *txwi,
+                     struct sk_buff *skb, struct mt76_wcid *wcid,
+                     struct ieee80211_key_conf *key, int pid,
+                     bool beacon)
 {
 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
 	struct ieee80211_vif *vif = info->control.vif;
@@ -857,7 +859,12 @@ void mt7921_mac_write_txwi(struct mt7921_dev *dev, __le32 *txwi,
 
 	txwi[3] = cpu_to_le32(val);
 	txwi[4] = 0;
-	txwi[5] = 0;
+
+	val = FIELD_PREP(MT_TXD5_PID, pid);
+	if (pid >= MT_PACKET_ID_FIRST)
+			val |= MT_TXD5_TX_STATUS_HOST;
+	txwi[5] = cpu_to_le32(val);
+
 	txwi[6] = 0;
 	txwi[7] = wcid->amsdu ? cpu_to_le32(MT_TXD7_HW_AMSDU) : 0;
 
@@ -947,7 +954,7 @@ int mt7921_tx_prepare_skb(struct mt76_dev *mdev, void *txwi_ptr,
 		return id;
 
 	mt7921_mac_write_txwi(dev, txwi_ptr, tx_info->skb, wcid, key,
-			      false);
+			      MT_PACKET_ID_NO_SKB, false);
 
 	txp = (struct mt7921_txp_common *)(txwi + MT_TXD_SIZE);
 	memset(txp, 0, sizeof(struct mt7921_txp_common));
@@ -1514,6 +1521,8 @@ void mt7921_mac_work(struct work_struct *work)
 	}
 
 	mt7921_mutex_release(phy->dev);
+
+	mt76_tx_status_check(mphy->dev, NULL, false);
 	ieee80211_queue_delayed_work(phy->mt76->hw, &mphy->mac_work,
 				     MT7921_WATCHDOG_TIME);
 }
