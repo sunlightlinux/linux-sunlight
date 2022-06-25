@@ -26,7 +26,10 @@
 #include <linux/topology.h>
 #include <linux/sched/clock.h>
 #include <linux/sched/cond_resched.h>
+#include <linux/sched/cputime.h>
 #include <linux/sched/debug.h>
+#include <linux/sched/hotplug.h>
+#include <linux/sched/init.h>
 #include <linux/sched/isolation.h>
 #include <linux/sched/loadavg.h>
 #include <linux/sched/mm.h>
@@ -1076,6 +1079,46 @@ void resched_curr(struct rq *rq)
 		trace_sched_wake_idle_without_ipi(cpu);
 }
 EXPORT_SYMBOL_GPL(resched_curr);
+
+#ifdef CONFIG_PREEMPT_LAZY
+
+static int tsk_is_polling(struct task_struct *p)
+{
+#ifdef TIF_POLLING_NRFLAG
+	return test_tsk_thread_flag(p, TIF_POLLING_NRFLAG);
+#else
+	return 0;
+#endif
+}
+
+void resched_curr_lazy(struct rq *rq)
+{
+	struct task_struct *curr = rq->curr;
+	int cpu;
+
+	if (!sched_feat(PREEMPT_LAZY)) {
+		resched_curr(rq);
+		return;
+	}
+
+	if (test_tsk_need_resched(curr))
+		return;
+
+	if (test_tsk_need_resched_lazy(curr))
+		return;
+
+	set_tsk_need_resched_lazy(curr);
+
+	cpu = cpu_of(rq);
+	if (cpu == smp_processor_id())
+		return;
+
+	/* NEED_RESCHED_LAZY must be visible before we test polling */
+	smp_mb();
+	if (!tsk_is_polling(curr))
+		smp_send_reschedule(cpu);
+}
+#endif
 
 void resched_cpu(int cpu)
 {
@@ -2268,6 +2311,7 @@ void migrate_disable(void)
 	preempt_disable();
 	this_rq()->nr_pinned++;
 	p->migration_disabled = 1;
+	preempt_lazy_disable();
 	preempt_enable();
 }
 EXPORT_SYMBOL_GPL(migrate_disable);
@@ -2299,6 +2343,7 @@ void migrate_enable(void)
 	barrier();
 	p->migration_disabled = 0;
 	this_rq()->nr_pinned--;
+	preempt_lazy_enable();
 	preempt_enable();
 }
 EXPORT_SYMBOL_GPL(migrate_enable);
@@ -2452,7 +2497,7 @@ static int migration_cpu_stop(void *data)
 	 * __migrate_task() such that we will not miss enforcing cpus_ptr
 	 * during wakeups, see set_cpus_allowed_ptr()'s TASK_WAKING test.
 	 */
-	flush_smp_call_function_from_idle();
+	flush_smp_call_function_queue();
 
 	raw_spin_lock(&p->pi_lock);
 	rq_lock(rq, &rf);
@@ -3326,6 +3371,8 @@ unsigned long wait_task_inactive(struct task_struct *p, unsigned int match_state
 	struct rq_flags rf;
 	unsigned long ncsw;
 	struct rq *rq;
+	bool saved_state_match;
+	bool update_ncsw;
 
 	for (;;) {
 		/*
@@ -3348,8 +3395,22 @@ unsigned long wait_task_inactive(struct task_struct *p, unsigned int match_state
 		 * is actually now running somewhere else!
 		 */
 		while (task_running(rq, p)) {
-			if (match_state && unlikely(READ_ONCE(p->__state) != match_state))
-				return 0;
+			if (match_state) {
+				unsigned long flags;
+				bool missmatch = false;
+
+				raw_spin_lock_irqsave(&p->pi_lock, flags);
+#ifdef CONFIG_PREEMPT_RT
+				if ((READ_ONCE(p->__state) != match_state) &&
+				    (READ_ONCE(p->saved_state) != match_state))
+#else
+				if (READ_ONCE(p->__state) != match_state)
+#endif
+					missmatch = true;
+				raw_spin_unlock_irqrestore(&p->pi_lock, flags);
+				if (missmatch)
+					return 0;
+			}
 			cpu_relax();
 		}
 
@@ -3363,7 +3424,21 @@ unsigned long wait_task_inactive(struct task_struct *p, unsigned int match_state
 		running = task_running(rq, p);
 		queued = task_on_rq_queued(p);
 		ncsw = 0;
-		if (!match_state || READ_ONCE(p->__state) == match_state)
+		update_ncsw = false;
+		saved_state_match = false;
+
+		if (!match_state) {
+			update_ncsw = true;
+		} else if (READ_ONCE(p->__state) == match_state) {
+			update_ncsw = true;
+#ifdef CONFIG_PREEMPT_RT
+		} else if (READ_ONCE(p->saved_state) == match_state) {
+			update_ncsw = true;
+			saved_state_match = true;
+#endif
+		}
+
+		if (update_ncsw)
 			ncsw = p->nvcsw | LONG_MIN; /* sets MSB */
 		task_rq_unlock(rq, p, &rf);
 
@@ -3393,7 +3468,7 @@ unsigned long wait_task_inactive(struct task_struct *p, unsigned int match_state
 		 * running right now), it's preempted, and we should
 		 * yield - it could be a while.
 		 */
-		if (unlikely(queued)) {
+		if (unlikely(queued) || saved_state_match) {
 			ktime_t to = NSEC_PER_SEC / HZ;
 
 			set_current_state(TASK_UNINTERRUPTIBLE);
@@ -4575,6 +4650,9 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 	p->on_cpu = 0;
 #endif
 	init_task_preempt_count(p);
+#ifdef CONFIG_HAVE_PREEMPT_LAZY
+	task_thread_info(p)->preempt_lazy_count = 0;
+#endif
 #ifdef CONFIG_SMP
 	plist_node_init(&p->pushable_tasks, MAX_PRIO);
 	RB_CLEAR_NODE(&p->pushable_dl_tasks);
@@ -6415,10 +6493,7 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 
 	/*
 	 * We must load prev->state once (task_struct::state is volatile), such
-	 * that:
-	 *
-	 *  - we form a control dependency vs deactivate_task() below.
-	 *  - ptrace_{,un}freeze_traced() can change ->state underneath us.
+	 * that we form a control dependency vs deactivate_task() below.
 	 */
 	prev_state = READ_ONCE(prev->__state);
 	if (!(sched_mode & SM_MASK_PREEMPT) && prev_state) {
@@ -6456,6 +6531,7 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 
 	next = pick_next_task(rq, prev, &rf);
 	clear_tsk_need_resched(prev);
+	clear_tsk_need_resched_lazy(prev);
 	clear_preempt_need_resched();
 #ifdef CONFIG_SCHED_DEBUG
 	rq->last_seen_need_resched_ns = 0;
@@ -6666,6 +6742,30 @@ static void __sched notrace preempt_schedule_common(void)
 	} while (need_resched());
 }
 
+#ifdef CONFIG_PREEMPT_LAZY
+/*
+ * If TIF_NEED_RESCHED is then we allow to be scheduled away since this is
+ * set by a RT task. Oterwise we try to avoid beeing scheduled out as long as
+ * preempt_lazy_count counter >0.
+ */
+static __always_inline int preemptible_lazy(void)
+{
+	if (test_thread_flag(TIF_NEED_RESCHED))
+		return 1;
+	if (current_thread_info()->preempt_lazy_count)
+		return 0;
+	return 1;
+}
+
+#else
+
+static inline int preemptible_lazy(void)
+{
+	return 1;
+}
+
+#endif
+
 #ifdef CONFIG_PREEMPTION
 /*
  * This is the entry point to schedule() from in-kernel preemption
@@ -6678,6 +6778,8 @@ asmlinkage __visible void __sched notrace preempt_schedule(void)
 	 * we do not want to preempt the current task. Just return..
 	 */
 	if (likely(!preemptible()))
+		return;
+	if (!preemptible_lazy())
 		return;
 	preempt_schedule_common();
 }
@@ -6724,6 +6826,9 @@ asmlinkage __visible void __sched notrace preempt_schedule_notrace(void)
 	enum ctx_state prev_ctx;
 
 	if (likely(!preemptible()))
+		return;
+
+	if (!preemptible_lazy())
 		return;
 
 	do {
@@ -8940,7 +9045,9 @@ void __init init_idle(struct task_struct *idle, int cpu)
 
 	/* Set the preempt count _outside_ the spinlocks! */
 	init_idle_preempt_count(idle, cpu);
-
+#ifdef CONFIG_HAVE_PREEMPT_LAZY
+	task_thread_info(idle)->preempt_lazy_count = 0;
+#endif
 	/*
 	 * The idle tasks have their own, simple scheduling class:
 	 */

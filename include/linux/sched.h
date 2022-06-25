@@ -104,7 +104,7 @@ struct task_group;
 /* Convenience macros for the sake of set_current_state: */
 #define TASK_KILLABLE			(TASK_WAKEKILL | TASK_UNINTERRUPTIBLE)
 #define TASK_STOPPED			(TASK_WAKEKILL | __TASK_STOPPED)
-#define TASK_TRACED			(TASK_WAKEKILL | __TASK_TRACED)
+#define TASK_TRACED			__TASK_TRACED
 
 #define TASK_IDLE			(TASK_UNINTERRUPTIBLE | TASK_NOLOAD)
 
@@ -119,11 +119,9 @@ struct task_group;
 
 #define task_is_running(task)		(READ_ONCE((task)->__state) == TASK_RUNNING)
 
-#define task_is_traced(task)		((READ_ONCE(task->__state) & __TASK_TRACED) != 0)
-
-#define task_is_stopped(task)		((READ_ONCE(task->__state) & __TASK_STOPPED) != 0)
-
-#define task_is_stopped_or_traced(task)	((READ_ONCE(task->__state) & (__TASK_STOPPED | __TASK_TRACED)) != 0)
+#define task_is_traced(task)		((READ_ONCE(task->jobctl) & JOBCTL_TRACED) != 0)
+#define task_is_stopped(task)		((READ_ONCE(task->jobctl) & JOBCTL_STOPPED) != 0)
+#define task_is_stopped_or_traced(task)	((READ_ONCE(task->jobctl) & (JOBCTL_STOPPED | JOBCTL_TRACED)) != 0)
 
 /*
  * Special states are those that do not use the normal wait-loop pattern. See
@@ -2033,6 +2031,43 @@ static inline int test_tsk_need_resched(struct task_struct *tsk)
 	return unlikely(test_tsk_thread_flag(tsk,TIF_NEED_RESCHED));
 }
 
+#ifdef CONFIG_PREEMPT_LAZY
+static inline void set_tsk_need_resched_lazy(struct task_struct *tsk)
+{
+	set_tsk_thread_flag(tsk,TIF_NEED_RESCHED_LAZY);
+}
+
+static inline void clear_tsk_need_resched_lazy(struct task_struct *tsk)
+{
+	clear_tsk_thread_flag(tsk,TIF_NEED_RESCHED_LAZY);
+}
+
+static inline int test_tsk_need_resched_lazy(struct task_struct *tsk)
+{
+	return unlikely(test_tsk_thread_flag(tsk,TIF_NEED_RESCHED_LAZY));
+}
+
+static inline int need_resched_lazy(void)
+{
+	return test_thread_flag(TIF_NEED_RESCHED_LAZY);
+}
+
+static inline int need_resched_now(void)
+{
+	return test_thread_flag(TIF_NEED_RESCHED);
+}
+
+#else
+static inline void clear_tsk_need_resched_lazy(struct task_struct *tsk) { }
+static inline int need_resched_lazy(void) { return 0; }
+
+static inline int need_resched_now(void)
+{
+	return test_thread_flag(TIF_NEED_RESCHED);
+}
+
+#endif
+
 /*
  * cond_resched() and cond_resched_lock(): latency reduction via
  * explicit rescheduling in places that are safe. The return
@@ -2369,5 +2404,7 @@ extern int sched_core_share_pid(unsigned int cmd, pid_t pid, enum pid_type type,
 static inline void sched_core_free(struct task_struct *tsk) { }
 static inline void sched_core_fork(struct task_struct *p) { }
 #endif
+
+extern void sched_set_stop_task(int cpu, struct task_struct *stop);
 
 #endif

@@ -607,12 +607,50 @@ struct softirq_action
 asmlinkage void do_softirq(void);
 asmlinkage void __do_softirq(void);
 
+#ifdef CONFIG_PREEMPT_RT
+extern void do_softirq_post_smp_call_flush(unsigned int was_pending);
+#else
+static inline void do_softirq_post_smp_call_flush(unsigned int unused)
+{
+	do_softirq();
+}
+#endif
+
 extern void open_softirq(int nr, void (*action)(struct softirq_action *));
 extern void softirq_init(void);
 extern void __raise_softirq_irqoff(unsigned int nr);
 
 extern void raise_softirq_irqoff(unsigned int nr);
 extern void raise_softirq(unsigned int nr);
+
+#ifdef CONFIG_PREEMPT_RT
+DECLARE_PER_CPU(struct task_struct *, timersd);
+DECLARE_PER_CPU(unsigned long, pending_timer_softirq);
+
+extern void raise_timer_softirq(void);
+extern void raise_hrtimer_softirq(void);
+
+static inline unsigned int local_pending_timers(void)
+{
+        return __this_cpu_read(pending_timer_softirq);
+}
+
+#else
+static inline void raise_timer_softirq(void)
+{
+	raise_softirq(TIMER_SOFTIRQ);
+}
+
+static inline void raise_hrtimer_softirq(void)
+{
+	raise_softirq_irqoff(HRTIMER_SOFTIRQ);
+}
+
+static inline unsigned int local_pending_timers(void)
+{
+        return local_softirq_pending();
+}
+#endif
 
 DECLARE_PER_CPU(struct task_struct *, ksoftirqd);
 
