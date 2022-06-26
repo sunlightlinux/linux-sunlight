@@ -1009,6 +1009,13 @@ static inline void update_mmu_cache(struct vm_area_struct *vma,
  * hardware-managed access flag on arm64.
  */
 #define arch_has_hw_pte_young		cpu_has_hw_af
+static inline bool arch_faults_on_old_pte(void)
+{
+	WARN_ON(is_migratable());
+
+	return !cpu_has_hw_af();
+}
+#define arch_faults_on_old_pte		arch_faults_on_old_pte
 
 /*
  * Experimentally, it's cheap to set the access flag in hardware and we
