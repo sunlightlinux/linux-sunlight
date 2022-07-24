@@ -1636,8 +1636,11 @@ const struct intel_pinctrl_soc_data *intel_pinctrl_get_soc_data(struct platform_
 		const void *match = device_get_match_data(&pdev->dev);
 
 		table = (const struct intel_pinctrl_soc_data **)match;
+		if(!table)
+			return ERR_PTR(-ENODEV);
+
 		for (i = 0; table[i]; i++) {
-			if (!strcmp(adev->pnp.unique_id, table[i]->uid)) {
+			if (adev->pnp.unique_id && table[i]->uid && !strcmp(adev->pnp.unique_id, table[i]->uid)) {
 				data = table[i];
 				break;
 			}
@@ -1650,6 +1653,9 @@ const struct intel_pinctrl_soc_data *intel_pinctrl_get_soc_data(struct platform_
 			return ERR_PTR(-ENODEV);
 
 		table = (const struct intel_pinctrl_soc_data **)id->driver_data;
+		if(!table)
+			return ERR_PTR(-ENODEV);
+
 		data = table[pdev->id];
 	}
 
