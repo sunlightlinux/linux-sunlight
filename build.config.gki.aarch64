@@ -19,12 +19,14 @@ android/abi_gki_aarch64_db845c
 android/abi_gki_aarch64_exynos
 android/abi_gki_aarch64_exynosauto
 android/abi_gki_aarch64_fips140
+android/abi_gki_aarch64_honor
 android/abi_gki_aarch64_imx
 android/abi_gki_aarch64_pixel
 android/abi_gki_aarch64_mtktv
 android/abi_gki_aarch64_mtk
 android/abi_gki_aarch64_qcom
 android/abi_gki_aarch64_unisoc
+android/abi_gki_aarch64_oplus
 "
 
 FILES="${FILES}
@@ -33,8 +35,9 @@ arch/arm64/boot/Image.gz
 "
 
 # Update BUILD.bazel, define_common_kernels() if the value is not 1.
-TRIM_NONLISTED_KMI=${TRIM_NONLISTED_KMI:-1}
-KMI_SYMBOL_LIST_STRICT_MODE=${KMI_SYMBOL_LIST_STRICT_MODE:-1}
+# TODO(b/188620248): Re-enable trimming
+# TRIM_NONLISTED_KMI=${TRIM_NONLISTED_KMI:-1}
+# KMI_SYMBOL_LIST_STRICT_MODE=${KMI_SYMBOL_LIST_STRICT_MODE:-1}
 
 BUILD_SYSTEM_DLKM=1
 MODULES_LIST=${ROOT_DIR}/${KERNEL_DIR}/android/gki_system_dlkm_modules

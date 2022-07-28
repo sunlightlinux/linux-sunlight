@@ -9,9 +9,12 @@
  * Following tracepoints are not exported in tracefs and provide a
  * mechanism for vendor modules to hook and extend functionality
  */
-struct ufs_hba;
-struct request;
-struct ufshcd_lrb;
+/* struct ufs_hba, struct ufshcd_lrb, struct uic_command */
+#include <ufs/ufshcd.h>
+/* struct request */
+#include <linux/blkdev.h>
+/* struct scsi_device */
+#include <scsi/scsi_device.h>
 
 DECLARE_HOOK(android_vh_ufs_fill_prdt,
 	TP_PROTO(struct ufs_hba *hba, struct ufshcd_lrb *lrbp,
@@ -35,7 +38,6 @@ DECLARE_HOOK(android_vh_ufs_compl_command,
 	TP_PROTO(struct ufs_hba *hba, struct ufshcd_lrb *lrbp),
 	TP_ARGS(hba, lrbp));
 
-struct uic_command;
 DECLARE_HOOK(android_vh_ufs_send_uic_command,
 	TP_PROTO(struct ufs_hba *hba, struct uic_command *ucmd, int str_t),
 	TP_ARGS(hba, ucmd, str_t));
@@ -48,11 +50,13 @@ DECLARE_HOOK(android_vh_ufs_check_int_errors,
 	TP_PROTO(struct ufs_hba *hba, bool queue_eh_work),
 	TP_ARGS(hba, queue_eh_work));
 
-struct scsi_device;
 DECLARE_HOOK(android_vh_ufs_update_sdev,
 	TP_PROTO(struct scsi_device *sdev),
 	TP_ARGS(sdev));
 
+DECLARE_HOOK(android_vh_ufs_clock_scaling,
+		TP_PROTO(struct ufs_hba *hba, bool *force_out, bool *force_scaling, bool *scale_up),
+		TP_ARGS(hba, force_out, force_scaling, scale_up));
 #endif /* _TRACE_HOOK_UFSHCD_H */
 /* This part must be outside protection */
 #include <trace/define_trace.h>
