@@ -434,6 +434,16 @@ struct ieee80211_sband_iftype_data {
 		const u8 *data;
 		unsigned int len;
 	} vendor_elems;
+
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+	ANDROID_BACKPORT_RESERVED(3);
+	ANDROID_BACKPORT_RESERVED(4);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
+	ANDROID_VENDOR_DATA(3);
+	ANDROID_VENDOR_DATA(4);
 };
 
 /**
@@ -543,6 +553,16 @@ struct ieee80211_supported_band {
 	struct ieee80211_edmg edmg_cap;
 	u16 n_iftype_data;
 	const struct ieee80211_sband_iftype_data *iftype_data;
+
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+	ANDROID_BACKPORT_RESERVED(3);
+	ANDROID_BACKPORT_RESERVED(4);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
+	ANDROID_VENDOR_DATA(3);
+	ANDROID_VENDOR_DATA(4);
 };
 
 /**
@@ -729,6 +749,12 @@ struct key_params {
 	u16 vlan_id;
 	u32 cipher;
 	enum nl80211_key_mode mode;
+
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
 };
 
 /**
@@ -751,6 +777,16 @@ struct cfg80211_chan_def {
 	u32 center_freq2;
 	struct ieee80211_edmg edmg;
 	u16 freq1_offset;
+
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+	ANDROID_BACKPORT_RESERVED(3);
+	ANDROID_BACKPORT_RESERVED(4);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
+	ANDROID_VENDOR_DATA(3);
+	ANDROID_VENDOR_DATA(4);
 };
 
 /*
@@ -1062,6 +1098,7 @@ struct survey_info {
 };
 
 #define CFG80211_MAX_WEP_KEYS	4
+#define CFG80211_MAX_NUM_AKM_SUITES	10
 
 /**
  * struct cfg80211_crypto_settings - Crypto settings
@@ -1113,7 +1150,7 @@ struct cfg80211_crypto_settings {
 	int n_ciphers_pairwise;
 	u32 ciphers_pairwise[NL80211_MAX_NR_CIPHER_SUITES];
 	int n_akm_suites;
-	u32 akm_suites[NL80211_MAX_NR_AKM_SUITES];
+	u32 akm_suites[CFG80211_MAX_NUM_AKM_SUITES];
 	bool control_port;
 	__be16 control_port_ethertype;
 	bool control_port_no_encrypt;
@@ -1125,6 +1162,12 @@ struct cfg80211_crypto_settings {
 	const u8 *sae_pwd;
 	u8 sae_pwd_len;
 	enum nl80211_sae_pwe_mechanism sae_pwe;
+
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
 
 	ANDROID_KABI_RESERVE(1);
 };
@@ -1186,6 +1229,9 @@ struct cfg80211_mbssid_elems {
  *	Token (measurement type 11)
  * @lci_len: LCI data length
  * @civicloc_len: Civic location data length
+ * @he_bss_color: BSS Color settings
+ * @he_bss_color_valid: indicates whether bss color
+ *	attribute is present in beacon data or not.
  */
 struct cfg80211_beacon_data {
 	const u8 *head, *tail;
@@ -1205,6 +1251,18 @@ struct cfg80211_beacon_data {
 	size_t probe_resp_len;
 	size_t lci_len;
 	size_t civicloc_len;
+	struct cfg80211_he_bss_color he_bss_color;
+	bool he_bss_color_valid;
+
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+	ANDROID_BACKPORT_RESERVED(3);
+	ANDROID_BACKPORT_RESERVED(4);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
+	ANDROID_VENDOR_DATA(3);
+	ANDROID_VENDOR_DATA(4);
 
 	ANDROID_KABI_RESERVE(1);
 };
@@ -1297,7 +1355,6 @@ struct cfg80211_unsol_bcast_probe_resp {
  * @sae_h2e_required: stations must support direct H2E technique in SAE
  * @flags: flags, as defined in enum cfg80211_ap_settings_flags
  * @he_obss_pd: OBSS Packet Detection settings
- * @he_bss_color: BSS Color settings
  * @he_oper: HE operation IE (or %NULL if HE isn't enabled)
  * @fils_discovery: FILS discovery transmission parameters
  * @unsol_bcast_probe_resp: Unsolicited broadcast probe response parameters
@@ -1331,10 +1388,21 @@ struct cfg80211_ap_settings {
 	bool twt_responder;
 	u32 flags;
 	struct ieee80211_he_obss_pd he_obss_pd;
-	struct cfg80211_he_bss_color he_bss_color;
 	struct cfg80211_fils_discovery fils_discovery;
 	struct cfg80211_unsol_bcast_probe_resp unsol_bcast_probe_resp;
 	struct cfg80211_mbssid_config mbssid_config;
+
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+	ANDROID_BACKPORT_RESERVED(3);
+	ANDROID_BACKPORT_RESERVED(4);
+	ANDROID_BACKPORT_RESERVED(5);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
+	ANDROID_VENDOR_DATA(3);
+	ANDROID_VENDOR_DATA(4);
+	ANDROID_VENDOR_DATA(5);
 
 	ANDROID_KABI_RESERVE(1);
 };
@@ -1366,6 +1434,12 @@ struct cfg80211_csa_settings {
 	bool radar_required;
 	bool block_tx;
 	u8 count;
+
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
 
 	ANDROID_KABI_RESERVE(1);
 };
@@ -1534,6 +1608,16 @@ struct station_parameters {
 	const struct ieee80211_eht_cap_elem *eht_capa;
 	u8 eht_capa_len;
 
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+	ANDROID_BACKPORT_RESERVED(3);
+	ANDROID_BACKPORT_RESERVED(4);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
+	ANDROID_VENDOR_DATA(3);
+	ANDROID_VENDOR_DATA(4);
+
 	ANDROID_KABI_RESERVE(1);
 };
 
@@ -1683,6 +1767,12 @@ struct rate_info {
 	u8 n_bonded_ch;
 	u8 eht_gi;
 	u8 eht_ru_alloc;
+
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
 };
 
 /**
@@ -1894,6 +1984,16 @@ struct station_info {
 	u32 airtime_link_metric;
 
 	u8 connected_to_as;
+
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+	ANDROID_BACKPORT_RESERVED(3);
+	ANDROID_BACKPORT_RESERVED(4);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
+	ANDROID_VENDOR_DATA(3);
+	ANDROID_VENDOR_DATA(4);
 
 	ANDROID_KABI_RESERVE(1);
 };
@@ -2412,6 +2512,16 @@ struct cfg80211_scan_request {
 	u32 n_6ghz_params;
 	struct cfg80211_scan_6ghz_params *scan_6ghz_params;
 
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+	ANDROID_BACKPORT_RESERVED(3);
+	ANDROID_BACKPORT_RESERVED(4);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
+	ANDROID_VENDOR_DATA(3);
+	ANDROID_VENDOR_DATA(4);
+
 	ANDROID_KABI_RESERVE(1);
 
 	/* keep last */
@@ -2560,6 +2670,16 @@ struct cfg80211_sched_scan_request {
 	bool nl_owner_dead;
 	struct list_head list;
 
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+	ANDROID_BACKPORT_RESERVED(3);
+	ANDROID_BACKPORT_RESERVED(4);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
+	ANDROID_VENDOR_DATA(3);
+	ANDROID_VENDOR_DATA(4);
+
 	ANDROID_KABI_RESERVE(1);
 
 	/* keep last */
@@ -2608,6 +2728,12 @@ struct cfg80211_inform_bss {
 	u8 parent_bssid[ETH_ALEN] __aligned(2);
 	u8 chains;
 	s8 chain_signal[IEEE80211_MAX_CHAINS];
+
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
 };
 
 /**
@@ -2685,6 +2811,16 @@ struct cfg80211_bss {
 	u8 bssid_index;
 	u8 max_bssid_indicator;
 
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+	ANDROID_BACKPORT_RESERVED(3);
+	ANDROID_BACKPORT_RESERVED(4);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
+	ANDROID_VENDOR_DATA(3);
+	ANDROID_VENDOR_DATA(4);
+
 	ANDROID_KABI_RESERVE(1);
 
 	u8 priv[] __aligned(sizeof(void *));
@@ -2758,6 +2894,7 @@ struct cfg80211_auth_request {
  *	userspace if this flag is set. Only applicable for cfg80211_connect()
  *	request (connect callback).
  * @ASSOC_REQ_DISABLE_HE:  Disable HE
+ * @ASSOC_REQ_DISABLE_EHT:  Disable EHT
  */
 enum cfg80211_assoc_req_flags {
 	ASSOC_REQ_DISABLE_HT			= BIT(0),
@@ -2765,6 +2902,7 @@ enum cfg80211_assoc_req_flags {
 	ASSOC_REQ_USE_RRM			= BIT(2),
 	CONNECT_REQ_EXTERNAL_AUTH_SUPPORT	= BIT(3),
 	ASSOC_REQ_DISABLE_HE			= BIT(4),
+	ASSOC_REQ_DISABLE_EHT			= BIT(5),
 };
 
 /**
@@ -3032,6 +3170,18 @@ struct cfg80211_connect_params {
 	bool want_1x;
 	struct ieee80211_edmg edmg;
 
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+	ANDROID_BACKPORT_RESERVED(3);
+	ANDROID_BACKPORT_RESERVED(4);
+	ANDROID_BACKPORT_RESERVED(5);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
+	ANDROID_VENDOR_DATA(3);
+	ANDROID_VENDOR_DATA(4);
+	ANDROID_VENDOR_DATA(5);
+
 	ANDROID_KABI_RESERVE(1);
 };
 
@@ -3125,6 +3275,14 @@ struct cfg80211_pmksa {
 	const u8 *cache_id;
 	u32 pmk_lifetime;
 	u8 pmk_reauth_threshold;
+
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+	ANDROID_BACKPORT_RESERVED(3);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
+	ANDROID_VENDOR_DATA(3);
 };
 
 /**
@@ -3310,6 +3468,14 @@ struct cfg80211_gtk_rekey_data {
 	const u8 *kek, *kck, *replay_ctr;
 	u32 akm;
 	u8 kek_len, kck_len;
+
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+	ANDROID_BACKPORT_RESERVED(3);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
+	ANDROID_VENDOR_DATA(3);
 };
 
 /**
@@ -3352,6 +3518,12 @@ struct cfg80211_mgmt_tx_params {
 	bool dont_wait_for_ack;
 	int n_csa_offsets;
 	const u16 *csa_offsets;
+
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
 };
 
 /**
@@ -3538,6 +3710,14 @@ struct cfg80211_external_auth_params {
 	unsigned int key_mgmt_suite;
 	u16 status;
 	const u8 *pmkid;
+
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+	ANDROID_BACKPORT_RESERVED(3);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
+	ANDROID_VENDOR_DATA(3);
 };
 
 /**
@@ -3799,6 +3979,14 @@ struct cfg80211_update_owe_info {
 	u16 status;
 	const u8 *ie;
 	size_t ie_len;
+
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+	ANDROID_BACKPORT_RESERVED(3);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
+	ANDROID_VENDOR_DATA(3);
 };
 
 /**
@@ -4523,6 +4711,18 @@ struct cfg80211_ops {
 	int	(*set_radar_background)(struct wiphy *wiphy,
 					struct cfg80211_chan_def *chandef);
 
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+	ANDROID_BACKPORT_RESERVED(3);
+	ANDROID_BACKPORT_RESERVED(4);
+	ANDROID_BACKPORT_RESERVED(5);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
+	ANDROID_VENDOR_DATA(3);
+	ANDROID_VENDOR_DATA(4);
+	ANDROID_VENDOR_DATA(5);
+
 	ANDROID_KABI_RESERVE(1);
 	ANDROID_KABI_RESERVE(2);
 	ANDROID_KABI_RESERVE(3);
@@ -4614,6 +4814,12 @@ enum wiphy_flags {
 struct ieee80211_iface_limit {
 	u16 max;
 	u16 types;
+
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
 };
 
 /**
@@ -4731,6 +4937,18 @@ struct ieee80211_iface_combination {
 	 *   combination must be greater or equal to this value.
 	 */
 	u32 beacon_int_min_gcd;
+
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+	ANDROID_BACKPORT_RESERVED(3);
+	ANDROID_BACKPORT_RESERVED(4);
+
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
+	ANDROID_VENDOR_DATA(3);
+	ANDROID_VENDOR_DATA(4);
+
 };
 
 struct ieee80211_txrx_stypes {
@@ -5169,6 +5387,13 @@ struct wiphy_iftype_akm_suites {
  * @ema_max_profile_periodicity: maximum profile periodicity supported by
  *	the driver. Setting this field to a non-zero value indicates that the
  *	driver supports enhanced multi-BSSID advertisements (EMA AP).
+ * @max_num_akm_suites: maximum number of AKM suites allowed for
+ *	configuration through %NL80211_CMD_CONNECT, %NL80211_CMD_ASSOCIATE and
+ *	%NL80211_CMD_START_AP. Set to NL80211_MAX_NR_AKM_SUITES if not set by
+ *	driver. If set by driver minimum allowed value is
+ *	NL80211_MAX_NR_AKM_SUITES in order to avoid compatibility issues with
+ *	legacy userspace and maximum allowed value is
+ *	CFG80211_MAX_NUM_AKM_SUITES.
  */
 struct wiphy {
 	struct mutex mtx;
@@ -5315,6 +5540,30 @@ struct wiphy {
 
 	u8 mbssid_max_interfaces;
 	u8 ema_max_profile_periodicity;
+	u16 max_num_akm_suites;
+
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+	ANDROID_BACKPORT_RESERVED(3);
+	ANDROID_BACKPORT_RESERVED(4);
+	ANDROID_BACKPORT_RESERVED(5);
+	ANDROID_BACKPORT_RESERVED(6);
+	ANDROID_BACKPORT_RESERVED(7);
+	ANDROID_BACKPORT_RESERVED(8);
+	ANDROID_BACKPORT_RESERVED(9);
+	ANDROID_BACKPORT_RESERVED(10);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
+	ANDROID_VENDOR_DATA(3);
+	ANDROID_VENDOR_DATA(4);
+	ANDROID_VENDOR_DATA(5);
+	ANDROID_VENDOR_DATA(6);
+	ANDROID_VENDOR_DATA(7);
+	ANDROID_VENDOR_DATA(8);
+	ANDROID_VENDOR_DATA(9);
+	ANDROID_VENDOR_DATA(10);
+
 
 	ANDROID_KABI_RESERVE(1);
 
@@ -5591,8 +5840,6 @@ static inline void wiphy_unlock(struct wiphy *wiphy)
  * @conn_owner_nlportid: (private) connection owner socket port ID
  * @disconnect_wk: (private) auto-disconnect work
  * @disconnect_bssid: (private) the BSSID to use for auto-disconnect
- * @ibss_fixed: (private) IBSS is using fixed BSSID
- * @ibss_dfs_possible: (private) IBSS may change to a DFS channel
  * @event_list: (private) list for internal event processing
  * @event_lock: (private) lock for event list
  * @owner_nlportid: (private) owner socket port ID
@@ -5641,9 +5888,6 @@ struct wireless_dev {
 	struct cfg80211_chan_def preset_chandef;
 	struct cfg80211_chan_def chandef;
 
-	bool ibss_fixed;
-	bool ibss_dfs_possible;
-
 	bool ps;
 	int ps_timeout;
 
@@ -5681,6 +5925,18 @@ struct wireless_dev {
 	struct work_struct pmsr_free_wk;
 
 	unsigned long unprot_beacon_reported;
+
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+	ANDROID_BACKPORT_RESERVED(3);
+	ANDROID_BACKPORT_RESERVED(4);
+	ANDROID_BACKPORT_RESERVED(5);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
+	ANDROID_VENDOR_DATA(3);
+	ANDROID_VENDOR_DATA(4);
+	ANDROID_VENDOR_DATA(5);
 
 	ANDROID_KABI_RESERVE(1);
 	ANDROID_KABI_RESERVE(2);
@@ -7196,6 +7452,12 @@ struct cfg80211_fils_resp_params {
 	const u8 *pmk;
 	size_t pmk_len;
 	const u8 *pmkid;
+
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
 };
 
 /**
@@ -7237,6 +7499,16 @@ struct cfg80211_connect_resp_params {
 	size_t resp_ie_len;
 	struct cfg80211_fils_resp_params fils;
 	enum nl80211_timeout_reason timeout_reason;
+
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+	ANDROID_BACKPORT_RESERVED(3);
+	ANDROID_BACKPORT_RESERVED(4);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
+	ANDROID_VENDOR_DATA(3);
+	ANDROID_VENDOR_DATA(4);
 };
 
 /**
@@ -7396,6 +7668,16 @@ struct cfg80211_roam_info {
 	const u8 *resp_ie;
 	size_t resp_ie_len;
 	struct cfg80211_fils_resp_params fils;
+
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+	ANDROID_BACKPORT_RESERVED(3);
+	ANDROID_BACKPORT_RESERVED(4);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
+	ANDROID_VENDOR_DATA(3);
+	ANDROID_VENDOR_DATA(4);
 };
 
 /**
@@ -8055,6 +8337,12 @@ struct cfg80211_ft_event_params {
 	const u8 *target_ap;
 	const u8 *ric_ies;
 	size_t ric_ies_len;
+
+	ANDROID_BACKPORT_RESERVED(1);
+	ANDROID_BACKPORT_RESERVED(2);
+
+	ANDROID_VENDOR_DATA(1);
+	ANDROID_VENDOR_DATA(2);
 };
 
 /**
