@@ -2582,16 +2582,18 @@ static int rsm_load_state_64(struct x86_emulate_ctxt *ctxt,
 static int em_rsm(struct x86_emulate_ctxt *ctxt)
 {
 	unsigned long cr0, cr4, efer;
-	char buf[512];
+	const union kvm_smram smram;
 	u64 smbase;
 	int ret;
+
+	BUILD_BUG_ON(sizeof(smram) != 512);
 
 	if ((ctxt->ops->get_hflags(ctxt) & X86EMUL_SMM_MASK) == 0)
 		return emulate_ud(ctxt);
 
 	smbase = ctxt->ops->get_smbase(ctxt);
 
-	ret = ctxt->ops->read_phys(ctxt, smbase + 0xfe00, buf, sizeof(buf));
+	ret = ctxt->ops->read_phys(ctxt, smbase + 0xfe00, (void *)&smram, sizeof(smram));
 	if (ret != X86EMUL_CONTINUE)
 		return X86EMUL_UNHANDLEABLE;
 
@@ -2641,15 +2643,15 @@ static int em_rsm(struct x86_emulate_ctxt *ctxt)
 	 * state (e.g. enter guest mode) before loading state from the SMM
 	 * state-save area.
 	 */
-	if (ctxt->ops->leave_smm(ctxt, buf))
+	if (ctxt->ops->leave_smm(ctxt, &smram))
 		goto emulate_shutdown;
 
 #ifdef CONFIG_X86_64
 	if (emulator_has_longmode(ctxt))
-		ret = rsm_load_state_64(ctxt, buf);
+		ret = rsm_load_state_64(ctxt, (const char *)&smram);
 	else
 #endif
-		ret = rsm_load_state_32(ctxt, buf);
+		ret = rsm_load_state_32(ctxt, (const char *)&smram);
 
 	if (ret != X86EMUL_CONTINUE)
 		goto emulate_shutdown;
