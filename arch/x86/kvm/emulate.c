@@ -2373,24 +2373,16 @@ static void rsm_load_seg_32(struct x86_emulate_ctxt *ctxt,
 }
 
 #ifdef CONFIG_X86_64
-static int rsm_load_seg_64(struct x86_emulate_ctxt *ctxt, const char *smstate,
-			   int n)
+static void rsm_load_seg_64(struct x86_emulate_ctxt *ctxt,
+			    const struct kvm_smm_seg_state_64 *state,
+			    int n)
 {
 	struct desc_struct desc;
-	int offset;
-	u16 selector;
-	u32 base3;
 
-	offset = 0x7e00 + n * 16;
-
-	selector =                GET_SMSTATE(u16, smstate, offset);
-	rsm_set_desc_flags(&desc, GET_SMSTATE(u16, smstate, offset + 2) << 8);
-	set_desc_limit(&desc,     GET_SMSTATE(u32, smstate, offset + 4));
-	set_desc_base(&desc,      GET_SMSTATE(u32, smstate, offset + 8));
-	base3 =                   GET_SMSTATE(u32, smstate, offset + 12);
-
-	ctxt->ops->set_segment(ctxt, selector, &desc, base3, n);
-	return X86EMUL_CONTINUE;
+	rsm_set_desc_flags(&desc, state->attributes << 8);
+	set_desc_limit(&desc,     state->limit);
+	set_desc_base(&desc,      (u32)state->base);
+	ctxt->ops->set_segment(ctxt, state->selector, &desc, state->base >> 32, n);
 }
 #endif
 
@@ -2484,71 +2476,49 @@ static int rsm_load_state_32(struct x86_emulate_ctxt *ctxt,
 
 #ifdef CONFIG_X86_64
 static int rsm_load_state_64(struct x86_emulate_ctxt *ctxt,
-			     const char *smstate)
+			     const struct kvm_smram_state_64 *smstate)
 {
-	struct desc_struct desc;
 	struct desc_ptr dt;
-	u64 val, cr0, cr3, cr4;
-	u32 base3;
-	u16 selector;
 	int i, r;
 
 	for (i = 0; i < 16; i++)
-		*reg_write(ctxt, i) = GET_SMSTATE(u64, smstate, 0x7ff8 - i * 8);
+		*reg_write(ctxt, i) = smstate->gprs[15 - i];
 
-	ctxt->_eip   = GET_SMSTATE(u64, smstate, 0x7f78);
-	ctxt->eflags = GET_SMSTATE(u32, smstate, 0x7f70) | X86_EFLAGS_FIXED;
+	ctxt->_eip   = smstate->rip;
+	ctxt->eflags = smstate->rflags | X86_EFLAGS_FIXED;
 
-	val = GET_SMSTATE(u64, smstate, 0x7f68);
-
-	if (ctxt->ops->set_dr(ctxt, 6, val))
+	if (ctxt->ops->set_dr(ctxt, 6, smstate->dr6))
+		return X86EMUL_UNHANDLEABLE;
+	if (ctxt->ops->set_dr(ctxt, 7, smstate->dr7))
 		return X86EMUL_UNHANDLEABLE;
 
-	val = GET_SMSTATE(u64, smstate, 0x7f60);
+	ctxt->ops->set_smbase(ctxt, smstate->smbase);
 
-	if (ctxt->ops->set_dr(ctxt, 7, val))
+	if (ctxt->ops->set_msr(ctxt, MSR_EFER, smstate->efer & ~EFER_LMA))
 		return X86EMUL_UNHANDLEABLE;
 
-	cr0 =                       GET_SMSTATE(u64, smstate, 0x7f58);
-	cr3 =                       GET_SMSTATE(u64, smstate, 0x7f50);
-	cr4 =                       GET_SMSTATE(u64, smstate, 0x7f48);
-	ctxt->ops->set_smbase(ctxt, GET_SMSTATE(u32, smstate, 0x7f00));
-	val =                       GET_SMSTATE(u64, smstate, 0x7ed0);
+	rsm_load_seg_64(ctxt, &smstate->tr, VCPU_SREG_TR);
 
-	if (ctxt->ops->set_msr(ctxt, MSR_EFER, val & ~EFER_LMA))
-		return X86EMUL_UNHANDLEABLE;
-
-	selector =                  GET_SMSTATE(u32, smstate, 0x7e90);
-	rsm_set_desc_flags(&desc,   GET_SMSTATE(u32, smstate, 0x7e92) << 8);
-	set_desc_limit(&desc,       GET_SMSTATE(u32, smstate, 0x7e94));
-	set_desc_base(&desc,        GET_SMSTATE(u32, smstate, 0x7e98));
-	base3 =                     GET_SMSTATE(u32, smstate, 0x7e9c);
-	ctxt->ops->set_segment(ctxt, selector, &desc, base3, VCPU_SREG_TR);
-
-	dt.size =                   GET_SMSTATE(u32, smstate, 0x7e84);
-	dt.address =                GET_SMSTATE(u64, smstate, 0x7e88);
+	dt.size =                   smstate->idtr.limit;
+	dt.address =                smstate->idtr.base;
 	ctxt->ops->set_idt(ctxt, &dt);
 
-	selector =                  GET_SMSTATE(u32, smstate, 0x7e70);
-	rsm_set_desc_flags(&desc,   GET_SMSTATE(u32, smstate, 0x7e72) << 8);
-	set_desc_limit(&desc,       GET_SMSTATE(u32, smstate, 0x7e74));
-	set_desc_base(&desc,        GET_SMSTATE(u32, smstate, 0x7e78));
-	base3 =                     GET_SMSTATE(u32, smstate, 0x7e7c);
-	ctxt->ops->set_segment(ctxt, selector, &desc, base3, VCPU_SREG_LDTR);
+	rsm_load_seg_64(ctxt, &smstate->ldtr, VCPU_SREG_LDTR);
 
-	dt.size =                   GET_SMSTATE(u32, smstate, 0x7e64);
-	dt.address =                GET_SMSTATE(u64, smstate, 0x7e68);
+	dt.size =                   smstate->gdtr.limit;
+	dt.address =                smstate->gdtr.base;
 	ctxt->ops->set_gdt(ctxt, &dt);
 
-	r = rsm_enter_protected_mode(ctxt, cr0, cr3, cr4);
+	r = rsm_enter_protected_mode(ctxt, smstate->cr0, smstate->cr3, smstate->cr4);
 	if (r != X86EMUL_CONTINUE)
 		return r;
 
-	for (i = 0; i < 6; i++) {
-		r = rsm_load_seg_64(ctxt, smstate, i);
-		if (r != X86EMUL_CONTINUE)
-			return r;
-	}
+	rsm_load_seg_64(ctxt, &smstate->es, VCPU_SREG_ES);
+	rsm_load_seg_64(ctxt, &smstate->cs, VCPU_SREG_CS);
+	rsm_load_seg_64(ctxt, &smstate->ss, VCPU_SREG_SS);
+	rsm_load_seg_64(ctxt, &smstate->ds, VCPU_SREG_DS);
+	rsm_load_seg_64(ctxt, &smstate->fs, VCPU_SREG_FS);
+	rsm_load_seg_64(ctxt, &smstate->gs, VCPU_SREG_GS);
 
 	return X86EMUL_CONTINUE;
 }
@@ -2623,7 +2593,7 @@ static int em_rsm(struct x86_emulate_ctxt *ctxt)
 
 #ifdef CONFIG_X86_64
 	if (emulator_has_longmode(ctxt))
-		ret = rsm_load_state_64(ctxt, (const char *)&smram);
+		ret = rsm_load_state_64(ctxt, &smram.smram64);
 	else
 #endif
 		ret = rsm_load_state_32(ctxt, &smram.smram32);
