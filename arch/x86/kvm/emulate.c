@@ -2654,6 +2654,11 @@ static int em_rsm(struct x86_emulate_ctxt *ctxt)
 	if (ret != X86EMUL_CONTINUE)
 		goto emulate_shutdown;
 
+
+	ret = emulator_recalc_and_set_mode(ctxt);
+	if (ret != X86EMUL_CONTINUE)
+		goto emulate_shutdown;
+
 	/*
 	 * Note, the ctxt->ops callbacks are responsible for handling side
 	 * effects when writing MSRs and CRs, e.g. MMU context resets, CPUID
