@@ -2435,7 +2435,7 @@ static int rsm_load_state_32(struct x86_emulate_ctxt *ctxt,
 			     const struct kvm_smram_state_32 *smstate)
 {
 	struct desc_ptr dt;
-	int i;
+	int i, r;
 
 	ctxt->eflags =  smstate->eflags | X86_EFLAGS_FIXED;
 	ctxt->_eip =  smstate->eip;
@@ -2470,8 +2470,16 @@ static int rsm_load_state_32(struct x86_emulate_ctxt *ctxt,
 
 	ctxt->ops->set_smbase(ctxt, smstate->smbase);
 
-	return rsm_enter_protected_mode(ctxt, smstate->cr0,
-					smstate->cr3, smstate->cr4);
+	r = rsm_enter_protected_mode(ctxt, smstate->cr0,
+				     smstate->cr3, smstate->cr4);
+
+	if (r != X86EMUL_CONTINUE)
+		return r;
+
+	ctxt->ops->set_int_shadow(ctxt, 0);
+	ctxt->interruptibility = (u8)smstate->int_shadow;
+
+	return X86EMUL_CONTINUE;
 }
 
 #ifdef CONFIG_X86_64
@@ -2519,6 +2527,9 @@ static int rsm_load_state_64(struct x86_emulate_ctxt *ctxt,
 	rsm_load_seg_64(ctxt, &smstate->ds, VCPU_SREG_DS);
 	rsm_load_seg_64(ctxt, &smstate->fs, VCPU_SREG_FS);
 	rsm_load_seg_64(ctxt, &smstate->gs, VCPU_SREG_GS);
+
+	ctxt->ops->set_int_shadow(ctxt, 0);
+	ctxt->interruptibility = (u8)smstate->int_shadow;
 
 	return X86EMUL_CONTINUE;
 }

@@ -8204,6 +8204,11 @@ static void emulator_set_nmi_mask(struct x86_emulate_ctxt *ctxt, bool masked)
 	static_call(kvm_x86_set_nmi_mask)(emul_to_vcpu(ctxt), masked);
 }
 
+static void emulator_set_int_shadow(struct x86_emulate_ctxt *ctxt, u8 shadow)
+{
+	 static_call(kvm_x86_set_interrupt_shadow)(emul_to_vcpu(ctxt), shadow);
+}
+
 static unsigned emulator_get_hflags(struct x86_emulate_ctxt *ctxt)
 {
 	return emul_to_vcpu(ctxt)->arch.hflags;
@@ -8284,6 +8289,7 @@ static const struct x86_emulate_ops emulate_ops = {
 	.guest_has_fxsr      = emulator_guest_has_fxsr,
 	.guest_has_rdpid     = emulator_guest_has_rdpid,
 	.set_nmi_mask        = emulator_set_nmi_mask,
+	.set_int_shadow      = emulator_set_int_shadow,
 	.get_hflags          = emulator_get_hflags,
 	.exiting_smm         = emulator_exiting_smm,
 	.leave_smm           = emulator_leave_smm,
@@ -10221,6 +10227,8 @@ static void enter_smm_save_state_32(struct kvm_vcpu *vcpu, struct kvm_smram_stat
 	smram->cr4 = kvm_read_cr4(vcpu);
 	smram->smm_revision = 0x00020000;
 	smram->smbase = vcpu->arch.smbase;
+
+	smram->int_shadow = static_call(kvm_x86_get_interrupt_shadow)(vcpu);
 }
 
 #ifdef CONFIG_X86_64
@@ -10269,6 +10277,8 @@ static void enter_smm_save_state_64(struct kvm_vcpu *vcpu, struct kvm_smram_stat
 	enter_smm_save_seg_64(vcpu, &smram->ds, VCPU_SREG_DS);
 	enter_smm_save_seg_64(vcpu, &smram->fs, VCPU_SREG_FS);
 	enter_smm_save_seg_64(vcpu, &smram->gs, VCPU_SREG_GS);
+
+	smram->int_shadow = static_call(kvm_x86_get_interrupt_shadow)(vcpu);
 }
 #endif
 
@@ -10304,6 +10314,8 @@ static void enter_smm(struct kvm_vcpu *vcpu)
 
 	kvm_set_rflags(vcpu, X86_EFLAGS_FIXED);
 	kvm_rip_write(vcpu, 0x8000);
+
+	static_call(kvm_x86_set_interrupt_shadow)(vcpu, 0);
 
 	cr0 = vcpu->arch.cr0 & ~(X86_CR0_PE | X86_CR0_EM | X86_CR0_TS | X86_CR0_PG);
 	static_call(kvm_x86_set_cr0)(vcpu, cr0);

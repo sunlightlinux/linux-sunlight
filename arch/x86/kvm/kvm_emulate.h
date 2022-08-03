@@ -234,6 +234,7 @@ struct x86_emulate_ops {
 	bool (*guest_has_rdpid)(struct x86_emulate_ctxt *ctxt);
 
 	void (*set_nmi_mask)(struct x86_emulate_ctxt *ctxt, bool masked);
+	void (*set_int_shadow)(struct x86_emulate_ctxt *ctxt, u8 shadow);
 
 	unsigned (*get_hflags)(struct x86_emulate_ctxt *ctxt);
 	void (*exiting_smm)(struct x86_emulate_ctxt *ctxt);
@@ -518,7 +519,8 @@ struct kvm_smram_state_32 {
 	u32 reserved1[62];
 	u32 smbase;
 	u32 smm_revision;
-	u32 reserved2[5];
+	u32 reserved2[4];
+	u32 int_shadow; /* KVM extension */
 	u32 cr4; /* CR4 is not present in Intel/AMD SMRAM image */
 	u32 reserved3[5];
 
@@ -566,6 +568,7 @@ static inline void __check_smram32_offsets(void)
 	__CHECK_SMRAM32_OFFSET(smbase,		0xFEF8);
 	__CHECK_SMRAM32_OFFSET(smm_revision,	0xFEFC);
 	__CHECK_SMRAM32_OFFSET(reserved2,	0xFF00);
+	__CHECK_SMRAM32_OFFSET(int_shadow,	0xFF10);
 	__CHECK_SMRAM32_OFFSET(cr4,		0xFF14);
 	__CHECK_SMRAM32_OFFSET(reserved3,	0xFF18);
 	__CHECK_SMRAM32_OFFSET(ds,		0xFF2C);
@@ -625,7 +628,7 @@ struct kvm_smram_state_64 {
 	u64 io_restart_rsi;
 	u64 io_restart_rdi;
 	u32 io_restart_dword;
-	u32 reserved1;
+	u32 int_shadow;
 	u8 io_inst_restart;
 	u8 auto_hlt_restart;
 	u8 reserved2[6];
@@ -663,7 +666,6 @@ struct kvm_smram_state_64 {
 	u64 gprs[16]; /* GPRS in a reversed "natural" X86 order (R15/R14/../RCX/RAX.) */
 };
 
-
 static inline void __check_smram64_offsets(void)
 {
 #define __CHECK_SMRAM64_OFFSET(field, offset) \
@@ -684,7 +686,7 @@ static inline void __check_smram64_offsets(void)
 	__CHECK_SMRAM64_OFFSET(io_restart_rsi,		0xFEB0);
 	__CHECK_SMRAM64_OFFSET(io_restart_rdi,		0xFEB8);
 	__CHECK_SMRAM64_OFFSET(io_restart_dword,	0xFEC0);
-	__CHECK_SMRAM64_OFFSET(reserved1,		0xFEC4);
+	__CHECK_SMRAM64_OFFSET(int_shadow,		0xFEC4);
 	__CHECK_SMRAM64_OFFSET(io_inst_restart,		0xFEC8);
 	__CHECK_SMRAM64_OFFSET(auto_hlt_restart,	0xFEC9);
 	__CHECK_SMRAM64_OFFSET(reserved2,		0xFECA);
