@@ -5856,3 +5856,9 @@ bool emulator_can_use_gpa(struct x86_emulate_ctxt *ctxt)
 
 	return true;
 }
+
+void  __init kvm_emulator_init(void)
+{
+	__check_smram32_offsets();
+	__check_smram64_offsets();
+}

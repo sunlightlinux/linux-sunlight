@@ -13785,6 +13785,7 @@ static int __init kvm_x86_init(void)
 {
 	kvm_mmu_x86_module_init();
 	mitigate_smt_rsb &= boot_cpu_has_bug(X86_BUG_SMT_RSB) && cpu_smt_possible();
+	kvm_emulator_init();
 	return 0;
 }
 module_init(kvm_x86_init);
