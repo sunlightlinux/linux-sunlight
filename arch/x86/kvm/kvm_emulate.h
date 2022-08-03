@@ -19,6 +19,7 @@
 struct x86_emulate_ctxt;
 enum x86_intercept;
 enum x86_intercept_stage;
+union kvm_smram;
 
 struct x86_exception {
 	u8 vector;
@@ -236,7 +237,7 @@ struct x86_emulate_ops {
 
 	unsigned (*get_hflags)(struct x86_emulate_ctxt *ctxt);
 	void (*exiting_smm)(struct x86_emulate_ctxt *ctxt);
-	int (*leave_smm)(struct x86_emulate_ctxt *ctxt, const char *smstate);
+	int (*leave_smm)(struct x86_emulate_ctxt *ctxt, const union kvm_smram *smram);
 	void (*triple_fault)(struct x86_emulate_ctxt *ctxt);
 	int (*set_xcr)(struct x86_emulate_ctxt *ctxt, u32 index, u64 xcr);
 };
