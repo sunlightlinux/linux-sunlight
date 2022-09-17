@@ -9820,6 +9820,11 @@ void __init sched_init(void)
 	BUG_ON(&dl_sched_class != &stop_sched_class + 1);
 #endif
 
+#ifdef CONFIG_SCHED_BORE
+	printk(KERN_INFO "BORE (Burst-Oriented Response Enhancer) CPU Scheduler modification 1.4.31.2 by Masahito Suzuki");
+	printk(KERN_INFO "BORE (Burst-Oriented Response Enhancer) CPU Scheduler aligned 1.4.31.2 by Ionut Nechita");
+#endif // CONFIG_SCHED_BORE
+
 	wait_bit_init();
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
