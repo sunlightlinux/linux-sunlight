@@ -34,6 +34,7 @@ place where this information is gathered.
    tee
    isapnp
    dcdbas
+   winesync
 
 .. only::  subproject and html
 
