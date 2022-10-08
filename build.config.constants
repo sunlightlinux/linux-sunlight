@@ -1,2 +1,2 @@
-BRANCH=android-mainline
+BRANCH=6.0
 CLANG_VERSION=r458507
