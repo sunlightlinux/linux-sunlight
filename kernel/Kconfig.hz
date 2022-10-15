@@ -24,12 +24,12 @@ choice
 	  with lots of processors that may show reduced performance if
 	  too many timer interrupts are occurring.
 
-        config HZ_200
-                bool "200 HZ"
-        help
-          200 Hz is a typical choice for servers, SMP and NUMA systems
-          with lots of processors that may show reduced performance if
-          too many timer interrupts are occurring.
+	config HZ_200
+		bool "200 HZ"
+	help
+	  200 Hz is a typical choice for servers, SMP and NUMA systems
+	  with lots of processors that may show reduced performance if
+	  too many timer interrupts are occurring.
 
 	config HZ_250
 		bool "250 HZ"
@@ -88,11 +88,6 @@ choice
 	 low latency. The response and interactive processes with 1666 Hz
 	 feel much snappier.
 
-	config HZ_3333
-		bool "3333 HZ"
-	help
-	 Tick every ~300us
-
 	config HZ_5000
 		bool "5000 HZ"
 	help
@@ -118,7 +113,6 @@ config HZ
 	default 858 if HZ_858
 	default 1000 if HZ_1000
 	default 1666 if HZ_1666
-	default 3333 if HZ_3333
 	default 5000 if HZ_5000
 	default 10000 if HZ_10000
 
