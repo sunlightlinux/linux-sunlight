@@ -355,6 +355,7 @@ static enum led_brightness bigben_get_led(struct led_classdev *led)
 
 static void bigben_remove(struct hid_device *hid)
 {
+	int n;
 	struct bigben_device *bigben = hid_get_drvdata(hid);
 	unsigned long flags;
 
@@ -362,6 +363,10 @@ static void bigben_remove(struct hid_device *hid)
 	bigben->removed = true;
 	spin_unlock_irqrestore(&bigben->lock, flags);
 
+	for (n = 0; n < NUM_LEDS; n++) {
+		if (bigben->leds[n])
+			devm_led_classdev_unregister(&hid->dev, bigben->leds[n]);
+	}
 	cancel_work_sync(&bigben->worker);
 	hid_hw_stop(hid);
 }
