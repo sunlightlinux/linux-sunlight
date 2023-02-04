@@ -96,6 +96,8 @@ config GKI_HIDDEN_QCOM_CONFIGS
 config GKI_HIDDEN_MEDIA_CONFIGS
 	bool "Hidden Media configs needed for GKI"
 	select VIDEOBUF2_CORE
+	select VIDEO_DEV
+	select DVB_MMAP
 	select V4L2_MEM2MEM_DEV
 	select MEDIA_CONTROLLER
 	select MEDIA_CONTROLLER_REQUEST_API
