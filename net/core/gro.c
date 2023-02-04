@@ -160,7 +160,6 @@ int skb_gro_receive(struct sk_buff *p, struct sk_buff *skb)
 	unsigned int gro_max_size;
 	unsigned int new_truesize;
 	struct sk_buff *lp;
-	int segs;
 
 	/* Do not splice page pool based packets w/ non-page pool
 	 * packets. This can result in reference count issues as page
@@ -185,7 +184,6 @@ int skb_gro_receive(struct sk_buff *p, struct sk_buff *skb)
 			return -E2BIG;
 	}
 
-	segs = NAPI_GRO_CB(skb)->count;
 	lp = NAPI_GRO_CB(p)->last;
 	pinfo = skb_shinfo(lp);
 
@@ -276,7 +274,7 @@ merge:
 	lp = p;
 
 done:
-	NAPI_GRO_CB(p)->count += segs;
+	NAPI_GRO_CB(p)->count++;
 	p->data_len += len;
 	p->truesize += delta_truesize;
 	p->len += len;
@@ -511,16 +509,8 @@ found_ptype:
 	BUILD_BUG_ON(!IS_ALIGNED(offsetof(struct napi_gro_cb, zeroed),
 					sizeof(u32))); /* Avoid slow unaligned acc */
 	*(u32 *)&NAPI_GRO_CB(skb)->zeroed = 0;
-	NAPI_GRO_CB(skb)->flush = skb_has_frag_list(skb);
+	NAPI_GRO_CB(skb)->flush = skb_is_gso(skb) || skb_has_frag_list(skb);
 	NAPI_GRO_CB(skb)->is_atomic = 1;
-	NAPI_GRO_CB(skb)->count = 1;
-	if (unlikely(skb_is_gso(skb))) {
-		NAPI_GRO_CB(skb)->count = skb_shinfo(skb)->gso_segs;
-		/* Only support TCP and non DODGY users. */
-		if (!skb_is_gso_tcp(skb) ||
-		    (skb_shinfo(skb)->gso_type & SKB_GSO_DODGY))
-			NAPI_GRO_CB(skb)->flush = 1;
-	}
 
 	/* Setup for GRO checksum validation */
 	switch (skb->ip_summed) {
@@ -564,10 +554,10 @@ found_ptype:
 	else
 		gro_list->count++;
 
+	NAPI_GRO_CB(skb)->count = 1;
 	NAPI_GRO_CB(skb)->age = jiffies;
 	NAPI_GRO_CB(skb)->last = skb;
-	if (!skb_is_gso(skb))
-		skb_shinfo(skb)->gso_size = skb_gro_len(skb);
+	skb_shinfo(skb)->gso_size = skb_gro_len(skb);
 	list_add(&skb->list, &gro_list->list);
 	ret = GRO_HELD;
 
@@ -679,7 +669,6 @@ static void napi_reuse_skb(struct napi_struct *napi, struct sk_buff *skb)
 
 	skb->encapsulation = 0;
 	skb_shinfo(skb)->gso_type = 0;
-	skb_shinfo(skb)->gso_size = 0;
 	if (unlikely(skb->slow_gro)) {
 		skb_orphan(skb);
 		skb_ext_reset(skb);
