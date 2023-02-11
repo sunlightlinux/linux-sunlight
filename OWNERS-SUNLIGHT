@@ -1,0 +1,3 @@
+# include OWNERS from the authoritative 6.1 branch
+include linux-sunlight:6.1:/OWNERS-SUNLIGHT
+include linux-sunlight:6.1:/sunlight/OWNERS
