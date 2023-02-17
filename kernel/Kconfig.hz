@@ -20,9 +20,9 @@ choice
 	config HZ_100
 		bool "100 HZ"
 	help
-	  100 Hz is a typical choice for servers, SMP and NUMA systems
-	  with lots of processors that may show reduced performance if
-	  too many timer interrupts are occurring.
+	 100 Hz is a typical choice for servers, SMP and NUMA systems
+	 with lots of processors that may show reduced performance if
+	 too many timer interrupts are occurring.
 
 	config HZ_200
 		bool "200 HZ"
