@@ -142,6 +142,7 @@ config GKI_LEGACY_WEXT_ALLCONFIG
 config GKI_HIDDEN_USB_CONFIGS
 	bool "Hiddel USB configurations needed for GKI"
 	select USB_PHY
+	select USB_CONFIGFS_UEVENT
 	help
 	  Dummy config option used to enable all USB related hidden configs.
 	  These configurations are usually only selected by another config
