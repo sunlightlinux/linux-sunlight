@@ -762,6 +762,7 @@ rwsem_spin_on_owner(struct rw_semaphore *sem)
 	enum owner_state state;
 	int cnt = 0;
 	bool time_out = false;
+	int i = 0;
 
 	lockdep_assert_preemption_disabled();
 
@@ -801,7 +802,8 @@ rwsem_spin_on_owner(struct rw_semaphore *sem)
 			break;
 		}
 
-		cpu_relax();
+		if (i++ > 1000)
+			cpu_relax();
 	}
 
 	return state;
