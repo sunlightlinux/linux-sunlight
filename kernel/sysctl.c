@@ -98,6 +98,7 @@ static const int six_hundred_forty_kb = 640 * 1024;
 #endif
 
 
+extern int sysctl_sched_yield_type;
 static const int ngroups_max = NGROUPS_MAX;
 static const int cap_last_cap = CAP_LAST_CAP;
 
@@ -1658,6 +1659,24 @@ static struct ctl_table kern_table[] = {
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
+	},
+#ifdef CONFIG_USER_NS
+	{
+		.procname	= "unprivileged_userns_clone",
+		.data		= &unprivileged_userns_clone,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+#endif
+	{
+		.procname       = "yield_type",
+		.data           = &sysctl_sched_yield_type,
+		.maxlen         = sizeof (int),
+		.mode           = 0644,
+		.proc_handler   = proc_dointvec,
+		.extra1         = SYSCTL_ZERO,
+		.extra2         = SYSCTL_TWO,
 	},
 #ifdef CONFIG_PROC_SYSCTL
 	{
