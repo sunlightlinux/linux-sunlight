@@ -1591,5 +1591,4 @@ EXPORT_SYMBOL_GPL(nf_nat_fullcone_ipv6);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Syrone Wong <wong.syrone@gmail.com>");
-MODULE_ALIAS_NFT_EXPR("fullcone");
 MODULE_DESCRIPTION("Netfilter fullcone expression support library of RFC3489 full cone NAT");
