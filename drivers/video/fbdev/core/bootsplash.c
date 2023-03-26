@@ -53,6 +53,14 @@ static void splash_callback_redraw_vc(struct work_struct *ignored)
 	console_unlock();
 }
 
+static void splash_callback_animation(struct work_struct *ignored)
+{
+	if (bootsplash_would_render_now()) {
+		/* This will also re-schedule this delayed worker */
+		splash_callback_redraw_vc(ignored);
+	}
+}
+
 
 static bool is_fb_compatible(const struct fb_info *info)
 {
@@ -103,16 +111,43 @@ static bool is_fb_compatible(const struct fb_info *info)
  */
 void bootsplash_render_full(struct fb_info *info)
 {
+	bool is_update = false;
+
 	mutex_lock(&splash_state.data_lock);
 
-	if (!is_fb_compatible(info))
-		goto out;
+	/*
+	 * If we've painted on this FB recently, we don't have to do
+	 * the sanity checks and background drawing again.
+	 */
+	if (splash_state.splash_fb == info)
+		is_update = true;
 
-	bootsplash_do_render_background(info, splash_state.file);
 
-	bootsplash_do_render_pictures(info, splash_state.file);
+	if (!is_update) {
+		/* Check whether we actually support this FB. */
+		splash_state.splash_fb = NULL;
+
+		if (!is_fb_compatible(info))
+			goto out;
+
+		/* Draw the background only once */
+		bootsplash_do_render_background(info, splash_state.file);
+
+		/* Mark this FB as last seen */
+		splash_state.splash_fb = info;
+	}
+
+	bootsplash_do_render_pictures(info, splash_state.file, is_update);
 
 	bootsplash_do_render_flush(info);
+
+	bootsplash_do_step_animations(splash_state.file);
+
+	/* Schedule update for animated splash screens */
+	if (splash_state.file->frame_ms > 0)
+		schedule_delayed_work(&splash_state.dwork_animation,
+				      msecs_to_jiffies(
+				      splash_state.file->frame_ms));
 
 out:
 	mutex_unlock(&splash_state.data_lock);
@@ -169,8 +204,14 @@ void bootsplash_enable(void)
 
 	was_enabled = test_and_set_bit(0, &splash_state.enabled);
 
-	if (!was_enabled)
+	if (!was_enabled) {
+		/* Force a full redraw when the splash is re-activated */
+		mutex_lock(&splash_state.data_lock);
+		splash_state.splash_fb = NULL;
+		mutex_unlock(&splash_state.data_lock);
+
 		schedule_work(&splash_state.work_redraw_vc);
+	}
 }
 
 
@@ -227,6 +268,14 @@ ATTRIBUTE_GROUPS(splash_dev);
  */
 static int splash_resume(struct device *device)
 {
+	/*
+	 * Force full redraw on resume since we've probably lost the
+	 * framebuffer's contents meanwhile
+	 */
+	mutex_lock(&splash_state.data_lock);
+	splash_state.splash_fb = NULL;
+	mutex_unlock(&splash_state.data_lock);
+
 	if (bootsplash_would_render_now())
 		schedule_work(&splash_state.work_redraw_vc);
 
@@ -235,6 +284,7 @@ static int splash_resume(struct device *device)
 
 static int splash_suspend(struct device *device)
 {
+	cancel_delayed_work_sync(&splash_state.dwork_animation);
 	cancel_work_sync(&splash_state.work_redraw_vc);
 
 	return 0;
@@ -296,6 +346,8 @@ void bootsplash_init(void)
 	set_bit(0, &splash_state.enabled);
 
 	INIT_WORK(&splash_state.work_redraw_vc, splash_callback_redraw_vc);
+	INIT_DELAYED_WORK(&splash_state.dwork_animation,
+			  splash_callback_animation);
 
 
 	if (!splash_state.bootfile || !strlen(splash_state.bootfile))

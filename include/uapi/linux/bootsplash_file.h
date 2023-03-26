@@ -77,7 +77,17 @@ struct splash_file_header {
 	uint16_t num_blobs;
 	uint8_t num_pics;
 
-	uint8_t padding[103];
+	uint8_t unused_1;
+
+	/*
+	 * Milliseconds to wait before painting the next frame in
+	 * an animation.
+	 * This is actually a minimum, as the system is allowed to
+	 * stall for longer between frames.
+	 */
+	uint16_t frame_ms;
+
+	uint8_t padding[100];
 } __attribute__((__packed__));
 
 
@@ -116,7 +126,23 @@ struct splash_pic_header {
 	 */
 	uint16_t position_offset;
 
-	uint8_t padding[24];
+	/*
+	 * Animation type.
+	 *  0 - off
+	 *  1 - forward loop
+	 */
+	uint8_t anim_type;
+
+	/*
+	 * Animation loop point.
+	 * Actual meaning depends on animation type:
+	 * Type 0 - Unused
+	 *      1 - Frame at which to restart the forward loop
+	 *          (allowing for "intro" frames)
+	 */
+	uint8_t anim_loop;
+
+	uint8_t padding[22];
 } __attribute__((__packed__));
 
 
@@ -156,6 +182,11 @@ enum splash_position {
 	SPLASH_CORNER_BOTTOM_LEFT = 6,
 	SPLASH_CORNER_LEFT = 7,
 	SPLASH_POS_FLAG_CORNER = 0x10,
+};
+
+enum splash_anim_type {
+	SPLASH_ANIM_NONE = 0,
+	SPLASH_ANIM_LOOP_FORWARD = 1,
 };
 
 #endif

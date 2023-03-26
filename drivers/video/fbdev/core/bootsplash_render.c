@@ -148,7 +148,8 @@ void bootsplash_do_render_background(struct fb_info *info,
 
 
 void bootsplash_do_render_pictures(struct fb_info *info,
-				   const struct splash_file_priv *fp)
+				   const struct splash_file_priv *fp,
+				   bool is_update)
 {
 	unsigned int i;
 
@@ -161,7 +162,11 @@ void bootsplash_do_render_pictures(struct fb_info *info,
 		if (pp->blobs_loaded < 1)
 			continue;
 
-		bp = &pp->blobs[0];
+		/* Skip static pictures when refreshing animations */
+		if (ph->anim_type == SPLASH_ANIM_NONE && is_update)
+			continue;
+
+		bp = &pp->blobs[pp->anim_nextframe];
 
 		if (!bp || bp->blob_header->type != 0)
 			continue;
@@ -349,5 +354,26 @@ void bootsplash_do_render_flush(struct fb_info *info)
 		area.sy = 0;
 
 		info->fbops->fb_copyarea(info, &area);
+	}
+}
+
+
+void bootsplash_do_step_animations(struct splash_file_priv *fp)
+{
+	unsigned int i;
+
+	/* Step every animation once */
+	for (i = 0; i < fp->header->num_pics; i++) {
+		struct splash_pic_priv *pp = &fp->pics[i];
+
+		if (pp->blobs_loaded < 2
+		    || pp->pic_header->anim_loop > pp->blobs_loaded)
+			continue;
+
+		if (pp->pic_header->anim_type == SPLASH_ANIM_LOOP_FORWARD) {
+			pp->anim_nextframe++;
+			if (pp->anim_nextframe >= pp->pic_header->num_blobs)
+				pp->anim_nextframe = pp->pic_header->anim_loop;
+		}
 	}
 }

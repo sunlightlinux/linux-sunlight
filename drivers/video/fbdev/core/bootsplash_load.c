@@ -71,6 +71,7 @@ struct splash_file_priv *bootsplash_load_firmware(struct device *device,
 {
 	const struct firmware *fw;
 	struct splash_file_priv *fp;
+	bool have_anim = false;
 	unsigned int i;
 	const u8 *walker;
 
@@ -133,6 +134,13 @@ struct splash_file_priv *bootsplash_load_firmware(struct device *device,
 		if (ph->num_blobs < 1) {
 			pr_err("Picture %u: Zero blobs? Aborting load.\n", i);
 			goto err;
+		}
+
+		if (ph->anim_type > SPLASH_ANIM_LOOP_FORWARD) {
+			pr_warn("Picture %u: Unsupported animation type %u.\n",
+				i, ph->anim_type);
+
+			ph->anim_type = SPLASH_ANIM_NONE;
 		}
 
 		pp->pic_header = ph;
@@ -202,6 +210,7 @@ nextblob:
 	/* Walk over pictures and ensure all blob slots are filled */
 	for (i = 0; i < fp->header->num_pics; i++) {
 		struct splash_pic_priv *pp = &fp->pics[i];
+		const struct splash_pic_header *ph = pp->pic_header;
 
 		if (pp->blobs_loaded != pp->pic_header->num_blobs) {
 			pr_err("Picture %u doesn't have all blob slots filled.\n",
@@ -209,7 +218,19 @@ nextblob:
 
 			goto err;
 		}
+
+		if (ph->anim_type
+		    && ph->num_blobs > 1
+		    && ph->anim_loop < pp->blobs_loaded)
+			have_anim = true;
 	}
+
+	if (!have_anim)
+		/* Disable animation timer if there is nothing to animate */
+		fp->frame_ms = 0;
+	else
+		/* Enforce minimum delay between frames */
+		fp->frame_ms = max((u16)20, fp->header->frame_ms);
 
 	pr_info("Loaded (%ld bytes, %u pics, %u blobs).\n",
 		fw->size,
