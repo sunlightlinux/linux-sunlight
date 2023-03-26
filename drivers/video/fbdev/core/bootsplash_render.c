@@ -155,6 +155,7 @@ void bootsplash_do_render_pictures(struct fb_info *info,
 	for (i = 0; i < fp->header->num_pics; i++) {
 		struct splash_blob_priv *bp;
 		struct splash_pic_priv *pp = &fp->pics[i];
+		const struct splash_pic_header *ph = pp->pic_header;
 		long dst_xoff, dst_yoff;
 
 		if (pp->blobs_loaded < 1)
@@ -165,8 +166,139 @@ void bootsplash_do_render_pictures(struct fb_info *info,
 		if (!bp || bp->blob_header->type != 0)
 			continue;
 
-		dst_xoff = (info->var.xres - pp->pic_header->width) / 2;
-		dst_yoff = (info->var.yres - pp->pic_header->height) / 2;
+		switch (ph->position) {
+		case SPLASH_POS_FLAG_CORNER | SPLASH_CORNER_TOP_LEFT:
+			dst_xoff = 0;
+			dst_yoff = 0;
+
+			dst_xoff += ph->position_offset;
+			dst_yoff += ph->position_offset;
+			break;
+		case SPLASH_POS_FLAG_CORNER | SPLASH_CORNER_TOP:
+			dst_xoff = info->var.xres - pp->pic_header->width;
+			dst_xoff /= 2;
+			dst_yoff = 0;
+
+			dst_yoff += ph->position_offset;
+			break;
+		case SPLASH_POS_FLAG_CORNER | SPLASH_CORNER_TOP_RIGHT:
+			dst_xoff = info->var.xres - pp->pic_header->width;
+			dst_yoff = 0;
+
+			dst_xoff -= ph->position_offset;
+			dst_yoff += ph->position_offset;
+			break;
+		case SPLASH_POS_FLAG_CORNER | SPLASH_CORNER_RIGHT:
+			dst_xoff = info->var.xres - pp->pic_header->width;
+			dst_yoff = info->var.yres - pp->pic_header->height;
+			dst_yoff /= 2;
+
+			dst_xoff -= ph->position_offset;
+			break;
+		case SPLASH_POS_FLAG_CORNER | SPLASH_CORNER_BOTTOM_RIGHT:
+			dst_xoff = info->var.xres - pp->pic_header->width;
+			dst_yoff = info->var.yres - pp->pic_header->height;
+
+			dst_xoff -= ph->position_offset;
+			dst_yoff -= ph->position_offset;
+			break;
+		case SPLASH_POS_FLAG_CORNER | SPLASH_CORNER_BOTTOM:
+			dst_xoff = info->var.xres - pp->pic_header->width;
+			dst_xoff /= 2;
+			dst_yoff = info->var.yres - pp->pic_header->height;
+
+			dst_yoff -= ph->position_offset;
+			break;
+		case SPLASH_POS_FLAG_CORNER | SPLASH_CORNER_BOTTOM_LEFT:
+			dst_xoff = 0 + ph->position_offset;
+			dst_yoff = info->var.yres - pp->pic_header->height
+						  - ph->position_offset;
+			break;
+		case SPLASH_POS_FLAG_CORNER | SPLASH_CORNER_LEFT:
+			dst_xoff = 0;
+			dst_yoff = info->var.yres - pp->pic_header->height;
+			dst_yoff /= 2;
+
+			dst_xoff += ph->position_offset;
+			break;
+
+		case SPLASH_CORNER_TOP_LEFT:
+			dst_xoff = info->var.xres - pp->pic_header->width;
+			dst_xoff /= 2;
+			dst_yoff = info->var.yres - pp->pic_header->height;
+			dst_yoff /= 2;
+
+			dst_xoff -= ph->position_offset;
+			dst_yoff -= ph->position_offset;
+			break;
+		case SPLASH_CORNER_TOP:
+			dst_xoff = info->var.xres - pp->pic_header->width;
+			dst_xoff /= 2;
+			dst_yoff = info->var.yres - pp->pic_header->height;
+			dst_yoff /= 2;
+
+			dst_yoff -= ph->position_offset;
+			break;
+		case SPLASH_CORNER_TOP_RIGHT:
+			dst_xoff = info->var.xres - pp->pic_header->width;
+			dst_xoff /= 2;
+			dst_yoff = info->var.yres - pp->pic_header->height;
+			dst_yoff /= 2;
+
+			dst_xoff += ph->position_offset;
+			dst_yoff -= ph->position_offset;
+			break;
+		case SPLASH_CORNER_RIGHT:
+			dst_xoff = info->var.xres - pp->pic_header->width;
+			dst_xoff /= 2;
+			dst_yoff = info->var.yres - pp->pic_header->height;
+			dst_yoff /= 2;
+
+			dst_xoff += ph->position_offset;
+			break;
+		case SPLASH_CORNER_BOTTOM_RIGHT:
+			dst_xoff = info->var.xres - pp->pic_header->width;
+			dst_xoff /= 2;
+			dst_yoff = info->var.yres - pp->pic_header->height;
+			dst_yoff /= 2;
+
+			dst_xoff += ph->position_offset;
+			dst_yoff += ph->position_offset;
+			break;
+		case SPLASH_CORNER_BOTTOM:
+			dst_xoff = info->var.xres - pp->pic_header->width;
+			dst_xoff /= 2;
+			dst_yoff = info->var.yres - pp->pic_header->height;
+			dst_yoff /= 2;
+
+			dst_yoff += ph->position_offset;
+			break;
+		case SPLASH_CORNER_BOTTOM_LEFT:
+			dst_xoff = info->var.xres - pp->pic_header->width;
+			dst_xoff /= 2;
+			dst_yoff = info->var.yres - pp->pic_header->height;
+			dst_yoff /= 2;
+
+			dst_xoff -= ph->position_offset;
+			dst_yoff += ph->position_offset;
+			break;
+		case SPLASH_CORNER_LEFT:
+			dst_xoff = info->var.xres - pp->pic_header->width;
+			dst_xoff /= 2;
+			dst_yoff = info->var.yres - pp->pic_header->height;
+			dst_yoff /= 2;
+
+			dst_xoff -= ph->position_offset;
+			break;
+
+		default:
+			/* As a fallback, center the picture. */
+			dst_xoff = info->var.xres - pp->pic_header->width;
+			dst_xoff /= 2;
+			dst_yoff = info->var.yres - pp->pic_header->height;
+			dst_yoff /= 2;
+			break;
+		}
 
 		if (dst_xoff < 0
 		    || dst_yoff < 0

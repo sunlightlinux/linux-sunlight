@@ -91,7 +91,32 @@ struct splash_pic_header {
 	 */
 	uint8_t num_blobs;
 
-	uint8_t padding[27];
+	/*
+	 * Corner to move the picture to / from.
+	 *  0x00 - Top left
+	 *  0x01 - Top
+	 *  0x02 - Top right
+	 *  0x03 - Right
+	 *  0x04 - Bottom right
+	 *  0x05 - Bottom
+	 *  0x06 - Bottom left
+	 *  0x07 - Left
+	 *
+	 * Flags:
+	 *  0x10 - Calculate offset from the corner towards the center,
+	 *         rather than from the center towards the corner
+	 */
+	uint8_t position;
+
+	/*
+	 * Pixel offset from the selected position.
+	 * Example: If the picture is in the top right corner, it will
+	 *          be placed position_offset pixels from the top and
+	 *          position_offset pixels from the right margin.
+	 */
+	uint16_t position_offset;
+
+	uint8_t padding[24];
 } __attribute__((__packed__));
 
 
@@ -114,5 +139,23 @@ struct splash_blob_header {
 
 	uint8_t padding[9];
 } __attribute__((__packed__));
+
+
+
+
+/*
+ * Enums for on-disk types
+ */
+enum splash_position {
+	SPLASH_CORNER_TOP_LEFT = 0,
+	SPLASH_CORNER_TOP = 1,
+	SPLASH_CORNER_TOP_RIGHT = 2,
+	SPLASH_CORNER_RIGHT = 3,
+	SPLASH_CORNER_BOTTOM_RIGHT = 4,
+	SPLASH_CORNER_BOTTOM = 5,
+	SPLASH_CORNER_BOTTOM_LEFT = 6,
+	SPLASH_CORNER_LEFT = 7,
+	SPLASH_POS_FLAG_CORNER = 0x10,
+};
 
 #endif
