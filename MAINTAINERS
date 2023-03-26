@@ -3722,6 +3722,8 @@ BOOTSPLASH
 M:     Max Staudt <mstaudt@suse.de>
 L:     linux-fbdev@vger.kernel.org
 S:     Maintained
+F:     Documentation/ABI/testing/sysfs-platform-bootsplash
+F:     Documentation/bootsplash.rst
 F:     drivers/video/fbdev/core/bootsplash*.*
 F:     drivers/video/fbdev/core/dummycon.c
 F:     include/linux/bootsplash.h

@@ -1,0 +1,11 @@
+What:		/sys/devices/platform/bootsplash.0/enabled
+Date:		Oct 2017
+KernelVersion:	4.14
+Contact:	Max Staudt <mstaudt@suse.de>
+Description:
+		Can be set and read.
+
+		0: Splash is disabled.
+		1: Splash is shown whenever fbcon would show a text console
+		   (i.e. no graphical application is running), and a splash
+		   file is loaded.
