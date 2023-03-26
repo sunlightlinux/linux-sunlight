@@ -112,6 +112,8 @@ void bootsplash_render_full(struct fb_info *info)
 
 	bootsplash_do_render_pictures(info, splash_state.file);
 
+	bootsplash_do_render_flush(info);
+
 out:
 	mutex_unlock(&splash_state.data_lock);
 }

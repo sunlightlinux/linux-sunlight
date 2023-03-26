@@ -186,3 +186,36 @@ void bootsplash_do_render_pictures(struct fb_info *info,
 				pp->pic_header->width, pp->pic_header->height);
 	}
 }
+
+
+void bootsplash_do_render_flush(struct fb_info *info)
+{
+	/*
+	 * FB drivers using deferred_io (such as Xen) need to sync the
+	 * screen after modifying its contents. When the FB is mmap()ed
+	 * from userspace, this happens via a dirty pages callback, but
+	 * when modifying the FB from the kernel, there is no such thing.
+	 *
+	 * So let's issue a fake fb_copyarea (copying the FB onto itself)
+	 * to trick the FB driver into syncing the screen.
+	 *
+	 * A few DRM drivers' FB implementations are broken by not using
+	 * deferred_io when they really should - we match on the known
+	 * bad ones manually for now.
+	 */
+	if (info->fbdefio
+	    || !strcmp(info->fix.id, "astdrmfb")
+	    || !strcmp(info->fix.id, "cirrusdrmfb")
+	    || !strcmp(info->fix.id, "mgadrmfb")) {
+		struct fb_copyarea area;
+
+		area.dx = 0;
+		area.dy = 0;
+		area.width = info->var.xres;
+		area.height = info->var.yres;
+		area.sx = 0;
+		area.sy = 0;
+
+		info->fbops->fb_copyarea(info, &area);
+	}
+}

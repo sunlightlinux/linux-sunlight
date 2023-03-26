@@ -89,6 +89,7 @@ void bootsplash_do_render_background(struct fb_info *info,
 				     const struct splash_file_priv *fp);
 void bootsplash_do_render_pictures(struct fb_info *info,
 				   const struct splash_file_priv *fp);
+void bootsplash_do_render_flush(struct fb_info *info);
 
 
 void bootsplash_free_file(struct splash_file_priv *fp);
