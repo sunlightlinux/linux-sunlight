@@ -32,6 +32,7 @@
 #include <linux/workqueue.h>
 
 #include "bootsplash_internal.h"
+#include "uapi/linux/bootsplash_file.h"
 
 
 /*
@@ -102,10 +103,17 @@ static bool is_fb_compatible(const struct fb_info *info)
  */
 void bootsplash_render_full(struct fb_info *info)
 {
-	if (!is_fb_compatible(info))
-		return;
+	mutex_lock(&splash_state.data_lock);
 
-	bootsplash_do_render_background(info);
+	if (!is_fb_compatible(info))
+		goto out;
+
+	bootsplash_do_render_background(info, splash_state.file);
+
+	bootsplash_do_render_pictures(info, splash_state.file);
+
+out:
+	mutex_unlock(&splash_state.data_lock);
 }
 
 
@@ -116,6 +124,7 @@ bool bootsplash_would_render_now(void)
 {
 	return !oops_in_progress
 		&& !console_blanked
+		&& splash_state.file
 		&& bootsplash_is_enabled();
 }
 
@@ -252,6 +261,7 @@ static struct platform_driver splash_driver = {
 void bootsplash_init(void)
 {
 	int ret;
+	struct splash_file_priv *fp;
 
 	/* Initialized already? */
 	if (splash_state.splash_device)
@@ -280,7 +290,25 @@ void bootsplash_init(void)
 	}
 
 
+	mutex_init(&splash_state.data_lock);
+	set_bit(0, &splash_state.enabled);
+
 	INIT_WORK(&splash_state.work_redraw_vc, splash_callback_redraw_vc);
+
+
+	if (!splash_state.bootfile || !strlen(splash_state.bootfile))
+		return;
+
+	fp = bootsplash_load_firmware(&splash_state.splash_device->dev,
+				      splash_state.bootfile);
+
+	if (!fp)
+		goto err;
+
+	mutex_lock(&splash_state.data_lock);
+	splash_state.splash_fb = NULL;
+	splash_state.file = fp;
+	mutex_unlock(&splash_state.data_lock);
 
 	return;
 
@@ -292,3 +320,7 @@ err_driver:
 err:
 	pr_err("Failed to initialize.\n");
 }
+
+
+module_param_named(bootfile, splash_state.bootfile, charp, 0444);
+MODULE_PARM_DESC(bootfile, "Bootsplash file to load on boot");

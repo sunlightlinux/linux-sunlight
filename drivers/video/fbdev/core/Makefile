@@ -28,4 +28,4 @@ obj-$(CONFIG_FB_SVGALIB)       += svgalib.o
 obj-$(CONFIG_FB_DDC)           += fb_ddc.o
 
 obj-$(CONFIG_BOOTSPLASH)       += bootsplash.o bootsplash_render.o \
-                                  dummyblit.o
+                                  bootsplash_load.o dummyblit.o

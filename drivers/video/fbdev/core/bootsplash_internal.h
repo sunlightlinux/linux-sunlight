@@ -15,15 +15,43 @@
 
 #include <linux/types.h>
 #include <linux/fb.h>
+#include <linux/firmware.h>
 #include <linux/kernel.h>
 #include <linux/mutex.h>
 #include <linux/spinlock.h>
+
+#include "uapi/linux/bootsplash_file.h"
 
 
 /*
  * Runtime types
  */
+struct splash_blob_priv {
+	struct splash_blob_header *blob_header;
+	const void *data;
+};
+
+
+struct splash_pic_priv {
+	const struct splash_pic_header *pic_header;
+
+	struct splash_blob_priv *blobs;
+	u16 blobs_loaded;
+};
+
+
+struct splash_file_priv {
+	const struct firmware *fw;
+	const struct splash_file_header *header;
+
+	struct splash_pic_priv *pics;
+};
+
+
 struct splash_priv {
+	/* Bootup and runtime state */
+	char *bootfile;
+
 	/*
 	 * Enabled/disabled state, to be used with atomic bit operations.
 	 *   Bit 0: 0 = Splash hidden
@@ -43,6 +71,13 @@ struct splash_priv {
 	struct platform_device *splash_device;
 
 	struct work_struct work_redraw_vc;
+
+	/* Splash data structures including lock for everything below */
+	struct mutex data_lock;
+
+	struct fb_info *splash_fb;
+
+	struct splash_file_priv *file;
 };
 
 
@@ -50,6 +85,14 @@ struct splash_priv {
 /*
  * Rendering functions
  */
-void bootsplash_do_render_background(struct fb_info *info);
+void bootsplash_do_render_background(struct fb_info *info,
+				     const struct splash_file_priv *fp);
+void bootsplash_do_render_pictures(struct fb_info *info,
+				   const struct splash_file_priv *fp);
+
+
+void bootsplash_free_file(struct splash_file_priv *fp);
+struct splash_file_priv *bootsplash_load_firmware(struct device *device,
+						  const char *path);
 
 #endif
