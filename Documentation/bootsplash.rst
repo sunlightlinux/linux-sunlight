@@ -195,6 +195,16 @@ Hooks - how the bootsplash is integrated
 
 
 
+Crating a bootsplash theme file
+===============================
+
+A simple tool for theme file creation is included in ``tools/bootsplash``.
+
+There is also an example shell script, as an example on how to use the tool
+and in order to generate a reference bootsplash file.
+
+
+
 FAQ: Frequently Asked Questions
 ===============================
 
