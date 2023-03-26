@@ -3728,6 +3728,7 @@ F:     drivers/video/fbdev/core/bootsplash*.*
 F:     drivers/video/fbdev/core/dummycon.c
 F:     include/linux/bootsplash.h
 F:     include/uapi/linux/bootsplash_file.h
+F:     tools/bootsplash/*
 
 BPF [GENERAL] (Safe Dynamic Programs and Tools)
 M:	Alexei Starovoitov <ast@kernel.org>
