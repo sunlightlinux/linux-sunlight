@@ -251,11 +251,65 @@ static ssize_t splash_store_enabled(struct device *device,
 	return count;
 }
 
+static ssize_t splash_store_drop_splash(struct device *device,
+					struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	struct splash_file_priv *fp;
+
+	if (!buf || !count || !splash_state.file)
+		return count;
+
+	mutex_lock(&splash_state.data_lock);
+	fp = splash_state.file;
+	splash_state.file = NULL;
+	mutex_unlock(&splash_state.data_lock);
+
+	/* Redraw the text console */
+	schedule_work(&splash_state.work_redraw_vc);
+
+	bootsplash_free_file(fp);
+
+	return count;
+}
+
+static ssize_t splash_store_load_file(struct device *device,
+				      struct device_attribute *attr,
+				      const char *buf, size_t count)
+{
+	struct splash_file_priv *fp, *fp_old;
+
+	if (!count)
+		return 0;
+
+	fp = bootsplash_load_firmware(&splash_state.splash_device->dev,
+				      buf);
+
+	if (!fp)
+		return -ENXIO;
+
+	mutex_lock(&splash_state.data_lock);
+	fp_old = splash_state.file;
+	splash_state.splash_fb = NULL;
+	splash_state.file = fp;
+	mutex_unlock(&splash_state.data_lock);
+
+	/* Update the splash or text console */
+	schedule_work(&splash_state.work_redraw_vc);
+
+	bootsplash_free_file(fp_old);
+	return count;
+}
+
 static DEVICE_ATTR(enabled, 0644, splash_show_enabled, splash_store_enabled);
+static DEVICE_ATTR(drop_splash, 0200, NULL, splash_store_drop_splash);
+static DEVICE_ATTR(load_file, 0200, NULL, splash_store_load_file);
 
 
 static struct attribute *splash_dev_attrs[] = {
 	&dev_attr_enabled.attr,
+	&dev_attr_drop_splash.attr,
+	&dev_attr_load_file.attr,
 	NULL
 };
 

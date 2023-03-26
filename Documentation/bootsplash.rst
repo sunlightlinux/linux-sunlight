@@ -67,6 +67,14 @@ sysfs run-time configuration
   a splash theme file is also loaded.
 
 
+``/sys/devices/platform/bootsplash.0/drop_splash``
+  Unload splash data and free memory.
+
+``/sys/devices/platform/bootsplash.0/load_file``
+  Load a splash file from ``/lib/firmware/``.
+  Note that trailing newlines will be interpreted as part of the file name.
+
+
 
 Kconfig
 =======
