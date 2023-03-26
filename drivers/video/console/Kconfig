@@ -136,6 +136,30 @@ config FRAMEBUFFER_CONSOLE_DEFERRED_TAKEOVER
 	  by the firmware in place, rather then replacing the contents with a
 	  black screen as soon as fbcon loads.
 
+config BOOTSPLASH
+	bool "Bootup splash screen"
+	depends on FRAMEBUFFER_CONSOLE
+	help
+	  This option enables the Linux bootsplash screen.
+
+	  The bootsplash is a full-screen logo or animation indicating a
+	  booting system. It replaces the classic scrolling text with a
+	  graphical alternative, similar to other systems.
+
+	  Since this is technically implemented as a hook on top of fbcon,
+	  it can only work if the FRAMEBUFFER_CONSOLE is enabled and a
+	  framebuffer driver is active. Thus, to get a text-free boot,
+	  the system needs to boot with vesafb, efifb, or similar.
+
+	  Once built into the kernel, the bootsplash needs to be enabled
+	  with bootsplash.enabled=1 and a splash file needs to be supplied.
+
+	  Further documentation can be found in:
+	    Documentation/fb/bootsplash.txt
+
+	  If unsure, say N.
+	  This is typically used by distributors and system integrators.
+
 config STI_CONSOLE
 	bool "STI text console"
 	depends on PARISC && HAS_IOMEM

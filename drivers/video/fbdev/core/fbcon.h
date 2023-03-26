@@ -219,6 +219,11 @@ static inline u_short fb_scrollmode(struct fbcon_display *fb)
 }
 
 
+#ifdef CONFIG_BOOTSPLASH
+extern void fbcon_set_dummyops(struct fbcon_ops *ops);
+#else /* CONFIG_BOOTSPLASH */
+#define fbcon_set_dummyops(x)
+#endif /* CONFIG_BOOTSPLASH */
 #ifdef CONFIG_FB_TILEBLITTING
 extern void fbcon_set_tileops(struct vc_data *vc, struct fb_info *info);
 #endif

@@ -79,6 +79,7 @@
 #include <asm/irq.h>
 
 #include "fbcon.h"
+#include <linux/bootsplash.h>
 
 /*
  * FIXME: Locking
@@ -555,6 +556,8 @@ static int do_fbcon_takeover(int show_logo)
 	for (i = first_fb_vc; i <= last_fb_vc; i++)
 		con2fb_map[i] = info_idx;
 
+	bootsplash_init();
+
 	err = do_take_over_console(&fb_con, first_fb_vc, last_fb_vc,
 				fbcon_is_default);
 
@@ -678,6 +681,9 @@ static void set_blitting_type(struct vc_data *vc, struct fb_info *info)
 	else {
 		fbcon_set_rotation(info);
 		fbcon_set_bitops(ops);
+
+		if (bootsplash_would_render_now())
+			fbcon_set_dummyops(ops);
 	}
 }
 
@@ -700,6 +706,19 @@ static void set_blitting_type(struct vc_data *vc, struct fb_info *info)
 	ops->p = &fb_display[vc->vc_num];
 	fbcon_set_rotation(info);
 	fbcon_set_bitops(ops);
+
+	/*
+	 * Note:
+	 * This is *eventually correct*.
+	 * Setting the fbcon operations and drawing the splash happen at
+	 * different points in time. If the splash is enabled/disabled
+	 * in between, then bootsplash_{en,dis}able will schedule a
+	 * redraw, which will again render the splash (or not) and set
+	 * the correct fbcon ops.
+	 * The last run will then be the right one.
+	 */
+	if (bootsplash_would_render_now())
+		fbcon_set_dummyops(ops);
 }
 
 static int fbcon_invalid_charcount(struct fb_info *info, unsigned charcount)
@@ -2258,6 +2277,9 @@ static int fbcon_switch(struct vc_data *vc)
 
 	info = fbcon_info_from_console(vc->vc_num);
 	ops = info->fbcon_par;
+
+	if (bootsplash_would_render_now())
+		bootsplash_render_full(info);
 
 	if (softback_top) {
 		if (softback_lines)

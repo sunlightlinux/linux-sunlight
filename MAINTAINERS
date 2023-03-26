@@ -3718,6 +3718,14 @@ S:	Maintained
 F:	Documentation/devicetree/bindings/iio/accel/bosch,bma400.yaml
 F:	drivers/iio/accel/bma400*
 
+BOOTSPLASH
+M:     Max Staudt <mstaudt@suse.de>
+L:     linux-fbdev@vger.kernel.org
+S:     Maintained
+F:     drivers/video/fbdev/core/bootsplash*.*
+F:     drivers/video/fbdev/core/dummycon.c
+F:     include/linux/bootsplash.h
+
 BPF [GENERAL] (Safe Dynamic Programs and Tools)
 M:	Alexei Starovoitov <ast@kernel.org>
 M:	Daniel Borkmann <daniel@iogearbox.net>
