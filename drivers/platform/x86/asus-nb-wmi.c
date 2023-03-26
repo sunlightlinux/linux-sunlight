@@ -107,6 +107,11 @@ static struct quirk_entry quirk_asus_forceals = {
 	.wmi_force_als_set = true,
 };
 
+static struct quirk_entry quirk_asus_use_no_tablet_switch = {
+	.wmi_backlight_set_devstate = true,
+	.tablet_switch_mode = asus_wmi_no_tablet_switch,
+};
+
 static struct quirk_entry quirk_asus_use_kbd_dock_devid = {
 	.tablet_switch_mode = asus_wmi_kbd_dock_devid,
 };
@@ -480,6 +485,15 @@ static const struct dmi_system_id asus_quirks[] = {
 	},
 	{
 		.callback = dmi_matched,
+		.ident = "ASUS ROG Zephyrus G14 GA401QM",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "ASUSTeK COMPUTER INC."),
+			DMI_MATCH(DMI_PRODUCT_NAME, "GA401QM"),
+		},
+		.driver_data = &quirk_asus_use_no_tablet_switch,
+	},
+	{
+		.callback = dmi_matched,
 		.ident = "ASUS VivoBook E410MA",
 		.matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "ASUSTeK COMPUTER INC."),
@@ -589,6 +603,7 @@ static const struct key_entry asus_nb_wmi_keymap[] = {
 	{ KE_KEY, 0xC4, { KEY_KBDILLUMUP } },
 	{ KE_KEY, 0xC5, { KEY_KBDILLUMDOWN } },
 	{ KE_IGNORE, 0xC6, },  /* Ambient Light Sensor notification */
+	{ KE_IGNORE, 0xCF, },
 	{ KE_KEY, 0xFA, { KEY_PROG2 } },           /* Lid flip action */
 	{ KE_KEY, 0xBD, { KEY_PROG2 } },           /* Lid flip action on ROG xflow laptops */
 	{ KE_END, 0},
