@@ -165,6 +165,13 @@ bool bootsplash_would_render_now(void)
 		&& bootsplash_is_enabled();
 }
 
+void bootsplash_mark_dirty(void)
+{
+	mutex_lock(&splash_state.data_lock);
+	splash_state.splash_fb = NULL;
+	mutex_unlock(&splash_state.data_lock);
+}
+
 bool bootsplash_is_enabled(void)
 {
 	bool was_enabled;
@@ -206,9 +213,7 @@ void bootsplash_enable(void)
 
 	if (!was_enabled) {
 		/* Force a full redraw when the splash is re-activated */
-		mutex_lock(&splash_state.data_lock);
-		splash_state.splash_fb = NULL;
-		mutex_unlock(&splash_state.data_lock);
+		bootsplash_mark_dirty();
 
 		schedule_work(&splash_state.work_redraw_vc);
 	}
@@ -272,9 +277,7 @@ static int splash_resume(struct device *device)
 	 * Force full redraw on resume since we've probably lost the
 	 * framebuffer's contents meanwhile
 	 */
-	mutex_lock(&splash_state.data_lock);
-	splash_state.splash_fb = NULL;
-	mutex_unlock(&splash_state.data_lock);
+	bootsplash_mark_dirty();
 
 	if (bootsplash_would_render_now())
 		schedule_work(&splash_state.work_redraw_vc);
