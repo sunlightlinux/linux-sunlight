@@ -1251,7 +1251,7 @@ static int v4l_enumoutput(const struct v4l2_ioctl_ops *ops,
 	return ops->vidioc_enum_output(file, fh, p);
 }
 
-static void v4l_fill_fmtdesc(struct v4l2_fmtdesc *fmt)
+static void v4l_fill_fmtdesc(struct video_device *vdev, struct v4l2_fmtdesc *fmt)
 {
 	const unsigned sz = sizeof(fmt->description);
 	const char *descr = NULL;
@@ -1505,7 +1505,7 @@ static void v4l_fill_fmtdesc(struct v4l2_fmtdesc *fmt)
 		default:
 			if (fmt->description[0])
 				return;
-			WARN(1, "Unknown pixelformat 0x%08x\n", fmt->pixelformat);
+			dev_warn(&vdev->dev, "Unknown pixelformat 0x%08x\n", fmt->pixelformat);
 			flags = 0;
 			snprintf(fmt->description, sz, "%p4cc",
 				 &fmt->pixelformat);
@@ -1590,7 +1590,7 @@ static int v4l_enum_fmt(const struct v4l2_ioctl_ops *ops,
 		break;
 	}
 	if (ret == 0)
-		v4l_fill_fmtdesc(p);
+		v4l_fill_fmtdesc(vdev, p);
 	return ret;
 }
 
