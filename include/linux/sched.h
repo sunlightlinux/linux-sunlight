@@ -590,6 +590,9 @@ struct sched_entity {
 	u64				slice;
 
 	u64				nr_migrations;
+	u64				prev_sleep_sum_runtime;
+	/* average duration of a task */
+	u64				dur_avg;
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	int				depth;

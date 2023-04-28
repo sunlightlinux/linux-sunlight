@@ -4731,6 +4731,8 @@ static void __sched_fork(unsigned long clone_flags, struct task_struct *p)
 #endif // CONFIG_SCHED_BORE
 	p->se.vlag			= 0;
 	p->se.slice			= sysctl_sched_base_slice;
+	p->se.dur_avg			= 0;
+	p->se.prev_sleep_sum_runtime	= 0;
 	INIT_LIST_HEAD(&p->se.group_node);
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
