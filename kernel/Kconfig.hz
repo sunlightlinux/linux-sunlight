@@ -80,6 +80,13 @@ choice
 	 if you want a balance between latency and performance,
 	 with more focus on latency.
 
+        config HZ_858
+                bool "858 HZ"
+	help
+	 858 Hz is alternative to 1000 Hz. Choose 858 Hz
+	 if you want a balance between latency and performance,
+	 with more focus on latency.
+
 	config HZ_1000
 		bool "1000 HZ"
 	help
@@ -93,6 +100,7 @@ choice
 	 if you don't care about overall throughput or performance, but
 	 you care more about latency (some realtime applications) require
 	 low latency. The response and interactive processes with 1666 Hz
+	default 858 if HZ_858
 	 feel much snappier.
 	default 833 if HZ_833
 
