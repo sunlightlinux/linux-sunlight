@@ -4,7 +4,11 @@
  * them to run sooner, but does not allow tons of sleepers to
  * rip the spread apart.
  */
+#ifdef CONFIG_SCHED_BORE
+SCHED_FEAT(GENTLE_FAIR_SLEEPERS, false)
+#else // CONFIG_SCHED_BORE
 SCHED_FEAT(GENTLE_FAIR_SLEEPERS, true)
+#endif // CONFIG_SCHED_BORE
 
 /*
  * Place new tasks ahead so that they do not starve already running
@@ -17,7 +21,11 @@ SCHED_FEAT(START_DEBIT, true)
  * wakeup-preemption), since its likely going to consume data we
  * touched, increases cache locality.
  */
+#ifdef CONFIG_SCHED_BORE
+SCHED_FEAT(NEXT_BUDDY, true)
+#else // CONFIG_SCHED_BORE
 SCHED_FEAT(NEXT_BUDDY, false)
+#endif // CONFIG_SCHED_BORE
 
 /*
  * Prefer to schedule the task that ran last (when we did
