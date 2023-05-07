@@ -61,6 +61,13 @@ choice
 	 on desktops with great smoothness without increasing CPU power
 	 consumption and sacrificing the battery life on laptops.
 
+	config HZ_750
+		bool "750 HZ"
+	help
+	 750 Hz is a good timer frequency for desktops. Provides fast
+	 interactivity with great smoothness without sacrificing too
+	 much throughput.
+
 	config HZ_833
 		bool "833 HZ"
 	help
@@ -111,6 +118,7 @@ config HZ
 	default 300 if HZ_300
 	default 417 if HZ_417
 	default 500 if HZ_500
+	default 750 if HZ_750
 	default 833 if HZ_833
 	default 858 if HZ_858
 	default 1000 if HZ_1000
