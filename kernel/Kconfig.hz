@@ -106,7 +106,7 @@ choice
 		bool "4500 HZ"
 	help
 	 4.5k Hz. The kernel would be lucky if it can finishes its job before
-	 the next tick happens (if you choose 4.5k Hz, it will tick every 450us).
+	 the next tick happens (if you choose 4.5k Hz, it will tick every 250us).
 
 endchoice
 
