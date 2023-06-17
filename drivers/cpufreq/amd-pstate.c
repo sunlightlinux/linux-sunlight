@@ -474,7 +474,8 @@ static int amd_pstate_update_freq(struct cpufreq_policy *policy,
 	if (!fast_switch)
 		cpufreq_freq_transition_begin(policy, &freqs);
 
-	amd_pstate_update(cpudata, min_perf, des_perf, max_perf, fast_switch);
+	amd_pstate_update(cpudata, min_perf, des_perf,
+			max_perf, false, policy->governor->flags);
 
 	if (!fast_switch)
 		cpufreq_freq_transition_end(policy, &freqs, false);
@@ -529,7 +530,8 @@ static void amd_pstate_adjust_perf(unsigned int cpu,
 	target_freq = div_u64(des_perf * max_freq, max_perf);
 	policy->cur = target_freq;
 
-	amd_pstate_update(cpudata, min_perf, des_perf, max_perf, true);
+	amd_pstate_update(cpudata, min_perf, des_perf, max_perf, true,
+			policy->governor->flags);
 	cpufreq_cpu_put(policy);
 }
 
