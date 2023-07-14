@@ -269,6 +269,12 @@ static u64 cpuid_get_supported_xcr0(struct kvm_cpuid_entry2 *entries, int nent)
 	return (best->eax | ((u64)best->edx << 32)) & kvm_caps.supported_xcr0;
 }
 
+bool vcpu_supports_xsave_pkru(struct kvm_vcpu *vcpu) {
+	u64 guest_supported_xcr0 = cpuid_get_supported_xcr0(
+	    vcpu->arch.cpuid_entries, vcpu->arch.cpuid_nent);
+	return (guest_supported_xcr0 & XFEATURE_MASK_PKRU) != 0;
+}
+
 static void __kvm_update_cpuid_runtime(struct kvm_vcpu *vcpu, struct kvm_cpuid_entry2 *entries,
 				       int nent)
 {
