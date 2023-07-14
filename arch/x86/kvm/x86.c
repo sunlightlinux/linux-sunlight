@@ -5633,6 +5633,19 @@ static int kvm_vcpu_ioctl_x86_set_xsave(struct kvm_vcpu *vcpu,
 	if (fpstate_is_confidential(&vcpu->arch.guest_fpu))
 		return vcpu->kvm->arch.has_protected_state ? -EINVAL : 0;
 
+	if (!vcpu_supports_xsave_pkru(vcpu)) {
+		void *buf = guest_xsave->region;
+		union fpregs_state *ustate = buf;
+		if (ustate->xsave.header.xfeatures & XFEATURE_MASK_PKRU) {
+			printk(
+				KERN_NOTICE "clearing PKRU xfeature bit as vCPU from PID %d"
+				" reports no PKRU support - migration from fpu-leaky kernel?",
+				current->pid
+			);
+			ustate->xsave.header.xfeatures &= ~XFEATURE_MASK_PKRU;
+		}
+	}
+
 	return fpu_copy_uabi_to_guest_fpstate(&vcpu->arch.guest_fpu,
 					      guest_xsave->region,
 					      kvm_caps.supported_xcr0,
