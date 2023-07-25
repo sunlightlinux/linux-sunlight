@@ -115,6 +115,19 @@ struct logicalVolIntegrityDescImpUse *udf_sb_lvidiu(struct super_block *sb)
 	if (!UDF_SB(sb)->s_lvid_bh)
 		return NULL;
 	lvid = (struct logicalVolIntegrityDesc *)UDF_SB(sb)->s_lvid_bh->b_data;
+	do {
+		u32 parts, impuselen;
+
+		parts = le32_to_cpu(lvid->numOfPartitions);
+		impuselen = le32_to_cpu(lvid->lengthOfImpUse);
+
+		if (parts >= sb->s_blocksize ||
+		    impuselen >= sb->s_blocksize ||
+		    sizeof(struct logicalVolIntegrityDesc) +
+		    impuselen + 2 * parts * sizeof(u32) > sb->s_blocksize)
+			return NULL;
+	} while (0);
+
 	partnum = le32_to_cpu(lvid->numOfPartitions);
 	/* The offset is to skip freeSpaceTable and sizeTable arrays */
 	offset = partnum * 2 * sizeof(uint32_t);
