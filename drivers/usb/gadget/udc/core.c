@@ -702,43 +702,6 @@ out:
 	return ret;
 }
 
-static int usb_gadget_disconnect_locked(struct usb_gadget *gadget)
-	__must_hold(&gadget->udc->connect_lock)
-{
-	int ret = 0;
-
-	if (!gadget->ops->pullup) {
-		ret = -EOPNOTSUPP;
-		goto out;
-	}
-
-	if (!gadget->connected)
-		goto out;
-
-	if (gadget->deactivated || !gadget->udc->started) {
-		/*
-		 * If gadget is deactivated we only save new state.
-		 * Gadget will stay disconnected after activation.
-		 */
-		gadget->connected = false;
-		goto out;
-	}
-
-	ret = gadget->ops->pullup(gadget, 0);
-	if (!ret)
-		gadget->connected = 0;
-
-	mutex_lock(&udc_lock);
-	if (gadget->udc->driver)
-		gadget->udc->driver->disconnect(gadget);
-	mutex_unlock(&udc_lock);
-
-out:
-	trace_usb_gadget_disconnect(gadget, ret);
-
-	return ret;
-}
-
 /**
  * usb_gadget_connect - software-controlled connect to USB host
  * @gadget:the peripheral being connected
@@ -761,7 +724,6 @@ int usb_gadget_connect(struct usb_gadget *gadget)
 }
 EXPORT_SYMBOL_GPL(usb_gadget_connect);
 
-/* Internal version of usb_gadget_disconnect needs to be called with connect_lock held. */
 static int usb_gadget_disconnect_locked(struct usb_gadget *gadget)
 	__must_hold(&gadget->udc->connect_lock)
 {
@@ -779,8 +741,6 @@ static int usb_gadget_disconnect_locked(struct usb_gadget *gadget)
 		/*
 		 * If gadget is deactivated we only save new state.
 		 * Gadget will stay disconnected after activation.
-		 *
-		 * udc should have been started before gadget being pulled down.
 		 */
 		gadget->connected = false;
 		goto out;

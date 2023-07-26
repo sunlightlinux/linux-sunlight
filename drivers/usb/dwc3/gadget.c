@@ -2651,8 +2651,10 @@ static int dwc3_gadget_pullup(struct usb_gadget *g, int is_on)
 
 	synchronize_irq(dwc->irq_gadget);
 
-	if (!is_on)
+	if (!is_on) {
 		ret = dwc3_gadget_soft_disconnect(dwc);
+		if (ret)
+			goto done;
 	} else {
 		/*
 		 * In the Synopsys DWC_usb31 1.90a programming guide section
@@ -2666,10 +2668,9 @@ static int dwc3_gadget_pullup(struct usb_gadget *g, int is_on)
 
 		dwc3_event_buffers_setup(dwc);
 		__dwc3_gadget_start(dwc);
-		ret = dwc3_gadget_run_stop(dwc, true);
-	}
-	else
+		dwc3_gadget_run_stop(dwc, true);
 		ret = dwc3_gadget_soft_connect(dwc);
+	}
 
 done:
 	pm_runtime_put(dwc->dev);
