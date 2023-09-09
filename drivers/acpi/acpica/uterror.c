@@ -182,7 +182,7 @@ acpi_ut_prefixed_namespace_error(const char *module_name,
 	switch (lookup_status) {
 	case AE_ALREADY_EXISTS:
 
-		acpi_os_printf(ACPI_MSG_BIOS_ERROR);
+		acpi_os_printf(ACPI_MSG_WARNING);
 		message = "Failure creating named object";
 		break;
 

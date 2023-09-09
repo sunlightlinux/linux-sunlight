@@ -296,7 +296,7 @@ static int sp5100_tco_timer_init(struct sp5100_tco *tco)
 
 	val = readl(SP5100_WDT_CONTROL(tco->tcobase));
 	if (val & SP5100_WDT_DISABLED) {
-		dev_err(dev, "Watchdog hardware is disabled\n");
+		dev_warn(dev, "Watchdog hardware is disabled\n");
 		return -ENODEV;
 	}
 
