@@ -1141,6 +1141,21 @@ static void volume_control_quirks(struct usb_mixer_elem_info *cval,
 		}
 		break;
 
+	case USB_ID(0x001f, 0x0b21):
+		if (strcmp(kctl->id.name, "PCM Playback Volume") == 0) {
+			usb_audio_info(chip,
+				"set PCM volume quirk for AB13X USB Audio\n");
+			cval->res = 128;
+			break;
+		}
+		if (strcmp(kctl->id.name, "Mic Capture Volume") == 0) {
+			usb_audio_info(chip,
+				"set Mic volume quirk for AB13X USB Audio\n");
+			cval->res = 256;
+			break;
+		}
+		break;
+
 	case USB_ID(0x0471, 0x0101):
 	case USB_ID(0x0471, 0x0104):
 	case USB_ID(0x0471, 0x0105):
