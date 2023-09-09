@@ -338,7 +338,7 @@ static void nvme_log_error(struct request *req)
 		return;
 	}
 
-	pr_err_ratelimited("%s: %s(0x%x), %s (sct 0x%x / sc 0x%x) %s%s\n",
+	pr_warn_ratelimited("%s: %s(0x%x), %s (sct 0x%x / sc 0x%x) %s%s\n",
 			   dev_name(nr->ctrl->device),
 			   nvme_get_admin_opcode_str(nr->cmd->common.opcode),
 			   nr->cmd->common.opcode,
