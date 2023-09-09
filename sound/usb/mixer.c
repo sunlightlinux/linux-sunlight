@@ -1147,6 +1147,21 @@ static void volume_control_quirks(struct usb_mixer_elem_info *cval,
 		}
 		break;
 
+	case USB_ID(0x001f, 0x0b21):
+		if (strcmp(kctl->id.name, "PCM Playback Volume") == 0) {
+			usb_audio_info(chip,
+				"set PCM volume quirk for AB13X USB Audio\n");
+			cval->res = 128;
+			break;
+		}
+		if (strcmp(kctl->id.name, "Mic Capture Volume") == 0) {
+			usb_audio_info(chip,
+				"set Mic volume quirk for AB13X USB Audio\n");
+			cval->res = 256;
+			break;
+		}
+		break;
+
 	case USB_ID(0x045e, 0x070f): /* MS LifeChat LX-3000 Headset */
 		if (!strcmp(kctl->id.name, "Speaker Playback Volume")) {
 			usb_audio_info(chip,
