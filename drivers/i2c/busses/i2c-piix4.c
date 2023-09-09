@@ -275,7 +275,7 @@ static int piix4_setup(struct pci_dev *PIIX4_dev,
 		pci_read_config_word(PIIX4_dev, SMBBA, &piix4_smba);
 		piix4_smba &= 0xfff0;
 		if(piix4_smba == 0) {
-			dev_err(&PIIX4_dev->dev, "SMBus base address "
+			dev_dbg(&PIIX4_dev->dev, "SMBus base address "
 				"uninitialized - upgrade BIOS or use "
 				"force_addr=0xaddr\n");
 			return -ENODEV;
