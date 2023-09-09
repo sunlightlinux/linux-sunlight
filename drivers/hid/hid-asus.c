@@ -1075,7 +1075,7 @@ static int asus_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	}
 
 	if (!drvdata->input) {
-		hid_err(hdev, "Asus input not registered\n");
+		hid_warn(hdev, "Asus input not registered\n");
 		ret = -ENOMEM;
 		goto err_stop_hw;
 	}
