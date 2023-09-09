@@ -355,7 +355,7 @@ static int mt7921_pci_probe(struct pci_dev *pdev,
 		chipid = 0x7920;
 	mdev->rev = (chipid << 16) |
 		    (mt7921_l1_rr(dev, MT_HW_REV) & 0xff);
-	dev_info(mdev->dev, "ASIC revision: %04x\n", mdev->rev);
+	dev_dbg(mdev->dev, "ASIC revision: %04x\n", mdev->rev);
 
 	ret = mt792x_wfsys_reset(dev);
 	if (ret)
