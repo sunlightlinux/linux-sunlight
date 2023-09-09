@@ -47,6 +47,13 @@ choice
 	 on desktops with great smoothness without increasing CPU power
 	 consumption and sacrificing the battery life on laptops.
 
+	config HZ_858
+		bool "858 HZ"
+	help
+	 858 Hz is alternative to 1000 Hz. Choose 858 Hz
+	 if you want a balance between latency and performance,
+	 with more focus on latency.
+
 	config HZ_1000
 		bool "1000 HZ"
 	help
@@ -61,6 +68,7 @@ config HZ
 	default 250 if HZ_250
 	default 300 if HZ_300
 	default 500 if HZ_500
+	default 858 if HZ_858
 	default 1000 if HZ_1000
 
 config SCHED_HRTICK
