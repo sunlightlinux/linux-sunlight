@@ -105,11 +105,11 @@ $M	$MAKE %{?_smp_mflags} INSTALL_MOD_PATH=%{buildroot} modules_install
 	$MAKE %{?_smp_mflags} INSTALL_HDR_PATH=%{buildroot}/usr headers_install
 	cp System.map %{buildroot}/boot/System.map-$KERNELRELEASE
 	cp .config %{buildroot}/boot/config-$KERNELRELEASE
-$S$M	rm -f %{buildroot}/lib/modules/$KERNELRELEASE/build
-$S$M	rm -f %{buildroot}/lib/modules/$KERNELRELEASE/source
+$S$M	rm -f %{buildroot}$MODLIB/build
+$S$M	rm -f %{buildroot}$MODLIB/source
 $S$M	mkdir -p %{buildroot}/usr/src/kernels/$KERNELRELEASE
 $S$M	tar cf - $EXCLUDES . | tar xf - -C %{buildroot}/usr/src/kernels/$KERNELRELEASE
-$S$M	cd %{buildroot}/lib/modules/$KERNELRELEASE
+$S$M	cd %{buildroot}$MODLIB
 $S$M	ln -sf /usr/src/kernels/$KERNELRELEASE build
 $S$M	ln -sf /usr/src/kernels/$KERNELRELEASE source
 
@@ -139,9 +139,9 @@ $S$M	ln -sf /usr/src/kernels/$KERNELRELEASE source
 
 	%files
 	%defattr (-, root, root)
-$M	/lib/modules/$KERNELRELEASE
-$M	%exclude /lib/modules/$KERNELRELEASE/build
-$M	%exclude /lib/modules/$KERNELRELEASE/source
+$M	$MODLIB
+$M	%exclude $MODLIB/build
+$M	%exclude $MODLIB/source
 	/boot/*
 
 	%files headers
@@ -151,6 +151,6 @@ $S$M
 $S$M	%files devel
 $S$M	%defattr (-, root, root)
 $S$M	/usr/src/kernels/$KERNELRELEASE
-$S$M	/lib/modules/$KERNELRELEASE/build
-$S$M	/lib/modules/$KERNELRELEASE/source
+$S$M	$MODLIB/build
+$S$M	$MODLIB/source
 EOF
