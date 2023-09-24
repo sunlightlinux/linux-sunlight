@@ -975,76 +975,6 @@ iomap_file_buffered_write(struct kiocb *iocb, struct iov_iter *i,
 }
 EXPORT_SYMBOL_GPL(iomap_file_buffered_write);
 
-static int iomap_write_delalloc_ifs_punch(struct inode *inode,
-		struct folio *folio, loff_t start_byte, loff_t end_byte,
-		iomap_punch_t punch)
-{
-	unsigned int first_blk, last_blk, i;
-	loff_t last_byte;
-	u8 blkbits = inode->i_blkbits;
-	struct iomap_folio_state *ifs;
-	int ret = 0;
-
-	/*
-	 * When we have per-block dirty tracking, there can be
-	 * blocks within a folio which are marked uptodate
-	 * but not dirty. In that case it is necessary to punch
-	 * out such blocks to avoid leaking any delalloc blocks.
-	 */
-	ifs = folio->private;
-	if (!ifs)
-		return ret;
-
-	last_byte = min_t(loff_t, end_byte - 1,
-			folio_pos(folio) + folio_size(folio) - 1);
-	first_blk = offset_in_folio(folio, start_byte) >> blkbits;
-	last_blk = offset_in_folio(folio, last_byte) >> blkbits;
-	for (i = first_blk; i <= last_blk; i++) {
-		if (!ifs_block_is_dirty(folio, ifs, i)) {
-			ret = punch(inode, folio_pos(folio) + (i << blkbits),
-				    1 << blkbits);
-			if (ret)
-				return ret;
-		}
-	}
-
-	return ret;
-}
-
-
-static int iomap_write_delalloc_punch(struct inode *inode, struct folio *folio,
-		loff_t *punch_start_byte, loff_t start_byte, loff_t end_byte,
-		iomap_punch_t punch)
-{
-	int ret = 0;
-
-	if (!folio_test_dirty(folio))
-		return ret;
-
-	/* if dirty, punch up to offset */
-	if (start_byte > *punch_start_byte) {
-		ret = punch(inode, *punch_start_byte,
-				start_byte - *punch_start_byte);
-		if (ret)
-			return ret;
-	}
-
-	/* Punch non-dirty blocks within folio */
-	ret = iomap_write_delalloc_ifs_punch(inode, folio, start_byte,
-			end_byte, punch);
-	if (ret)
-		return ret;
-
-	/*
-	 * Make sure the next punch start is correctly bound to
-	 * the end of this data range, not the end of the folio.
-	 */
-	*punch_start_byte = min_t(loff_t, end_byte,
-				folio_pos(folio) + folio_size(folio));
-
-	return ret;
-}
-
 /*
  * Scan the data range passed to us for dirty page cache folios. If we find a
  * dirty folio, punch out the preceeding range and update the offset from which
@@ -1068,7 +998,6 @@ static int iomap_write_delalloc_scan(struct inode *inode,
 {
 	while (start_byte < end_byte) {
 		struct folio	*folio;
-		int ret;
 
 		/* grab locked page */
 		folio = filemap_lock_folio(inode->i_mapping,
