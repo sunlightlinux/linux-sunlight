@@ -636,16 +636,6 @@ void wireless_send_event(struct net_device *	dev,
 }
 EXPORT_SYMBOL(wireless_send_event);
 
-#ifdef CONFIG_CFG80211_WEXT
-static void wireless_warn_cfg80211_wext(void)
-{
-	char name[sizeof(current->comm)];
-
-	pr_warn_once("warning: `%s' uses wireless extensions which will stop working for Wi-Fi 7 hardware; use nl80211\n",
-		     get_task_comm(name, current));
-}
-#endif
-
 /* IW handlers */
 
 struct iw_statistics *get_wireless_stats(struct net_device *dev)
@@ -660,10 +650,8 @@ struct iw_statistics *get_wireless_stats(struct net_device *dev)
 	if (dev->ieee80211_ptr &&
 	    dev->ieee80211_ptr->wiphy &&
 	    dev->ieee80211_ptr->wiphy->wext &&
-	    dev->ieee80211_ptr->wiphy->wext->get_wireless_stats) {
-		wireless_warn_cfg80211_wext();
+	    dev->ieee80211_ptr->wiphy->wext->get_wireless_stats)
 		return dev->ieee80211_ptr->wiphy->wext->get_wireless_stats(dev);
-	}
 #endif
 
 	/* not found */
@@ -700,10 +688,8 @@ static iw_handler get_handler(struct net_device *dev, unsigned int cmd)
 	const struct iw_handler_def *handlers = NULL;
 
 #ifdef CONFIG_CFG80211_WEXT
-	if (dev->ieee80211_ptr && dev->ieee80211_ptr->wiphy) {
-		wireless_warn_cfg80211_wext();
+	if (dev->ieee80211_ptr && dev->ieee80211_ptr->wiphy)
 		handlers = dev->ieee80211_ptr->wiphy->wext;
-	}
 #endif
 #ifdef CONFIG_WIRELESS_EXT
 	if (dev->wireless_handlers)
