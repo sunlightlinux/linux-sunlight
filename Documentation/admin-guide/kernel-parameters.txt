@@ -4302,6 +4302,15 @@
 			value given is the I/O port to use (typically 0x1b0).
 			By default set to 1 if CONFIG_PATA_WINBOND_VLB_MODULE,
 			0 otherwise.
+		pci_acs_override =
+				[PCIE] Override missing PCIe ACS support for:
+				downstream
+					All downstream ports - full ACS capabilities
+				multifunction
+					Add multifunction devices - multifunction ACS subset
+				id:nnnn:nnnn
+					Specific device - full ACS capabilities
+					Specified as vid:did (vendor/device ID) in hex
 
 	pata_platform.pio_mask=	[HW,LIBATA]
 			Format: <int>
