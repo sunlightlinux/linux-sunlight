@@ -1624,18 +1624,18 @@ static struct ctl_table kern_table[] = {
 	{
 		.procname	= "panic",
 		.data		= &panic_timeout,
-	{
-		.procname	= "yield_type",
-		.data		= &sysctl_sched_yield_type,
-		.maxlen		= sizeof (int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-		.extra1		= SYSCTL_ZERO,
-		.extra2		= SYSCTL_TWO,
-	},
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname       = "yield_type",
+		.data           = &sysctl_sched_yield_type,
+		.maxlen         = sizeof (int),
+		.mode           = 0644,
+		.proc_handler   = proc_dointvec,
+		.extra1         = SYSCTL_ZERO,
+		.extra2         = SYSCTL_TWO,
 	},
 #ifdef CONFIG_USER_NS
 	{
