@@ -7770,20 +7770,20 @@ static void __init wq_cpu_intensive_thresh_init(void)
 		return;
 
 	/*
-	 * The default of 10ms is derived from the fact that most modern (as of
-	 * 2023) processors can do a lot in 10ms and that it's just below what
+	 * The default of 30ms is derived from the fact that most modern (as of
+	 * 2023) processors can do a lot in 30ms and that it's just below what
 	 * most consider human-perceivable. However, the kernel also runs on a
 	 * lot slower CPUs including microcontrollers where the threshold is way
 	 * too low.
 	 *
-	 * Let's scale up the threshold upto 1 second if BogoMips is below 4000.
+	 * Let's scale up the threshold upto 3 second if BogoMips is below 4000.
 	 * This is by no means accurate but it doesn't have to be. The mechanism
 	 * is still useful even when the threshold is fully scaled up. Also, as
 	 * the reports would usually be applicable to everyone, some machines
 	 * operating on longer thresholds won't significantly diminish their
 	 * usefulness.
 	 */
-	thresh = 10 * USEC_PER_MSEC;
+	thresh = 30 * USEC_PER_MSEC;
 
 	/* see init/calibrate.c for lpj -> BogoMIPS calculation */
 	bogo = max_t(unsigned long, loops_per_jiffy / 500000 * HZ, 1);
