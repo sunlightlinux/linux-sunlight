@@ -5176,6 +5176,7 @@ static __init void svm_set_cpu_caps(void)
 	if (nested) {
 		kvm_cpu_cap_set(X86_FEATURE_SVM);
 		kvm_cpu_cap_set(X86_FEATURE_VMCBCLEAN);
+		kvm_cpu_cap_set(X86_FEATURE_FLUSHBYASID);
 
 		/*
 		 * KVM currently flushes TLBs on *every* nested SVM transition,
