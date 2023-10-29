@@ -227,6 +227,7 @@ struct asus_rfkill {
 
 enum fan_type {
 	FAN_TYPE_NONE = 0,
+	FAN_TYPE_FAULT = 2,
 	FAN_TYPE_AGFN,		/* deprecated on newer platforms */
 	FAN_TYPE_SPEC83,	/* starting in Spec 8.3, use CPU_FAN_CTRL */
 };
@@ -3216,7 +3217,7 @@ static int fan_curve_get_factory_default(struct asus_wmi *asus, u32 fan_dev)
 {
 	struct fan_curve_data *curves;
 	u8 buf[FAN_CURVE_BUF_LEN];
-	int err, fan_idx;
+	int fan_idx;
 	u8 mode = 0;
 
 	if (asus->throttle_thermal_policy_dev)
@@ -3227,13 +3228,8 @@ static int fan_curve_get_factory_default(struct asus_wmi *asus, u32 fan_dev)
 	else if (mode == 1)
 		mode = 2;
 
-	err = asus_wmi_evaluate_method_buf(asus->dsts_id, fan_dev, mode, buf,
+	asus_wmi_evaluate_method_buf(asus->dsts_id, fan_dev, mode, buf,
 					   FAN_CURVE_BUF_LEN);
-	if (err) {
-		pr_warn("%s (0x%08x) failed: %d\n", __func__, fan_dev, err);
-		return err;
-	}
-
 	fan_idx = FAN_CURVE_DEV_CPU;
 	if (fan_dev == ASUS_WMI_DEVID_GPU_FAN_CURVE)
 		fan_idx = FAN_CURVE_DEV_GPU;
@@ -3257,6 +3253,9 @@ static int fan_curve_check_present(struct asus_wmi *asus, bool *available,
 	*available = false;
 
 	if (asus->fan_type == FAN_TYPE_NONE)
+		return 0;
+
+	if (asus->fan_type == FAN_TYPE_FAULT)
 		return 0;
 
 	err = fan_curve_get_factory_default(asus, fan_dev);
