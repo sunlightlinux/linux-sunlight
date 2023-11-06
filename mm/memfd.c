@@ -316,7 +316,7 @@ static int check_sysctl_memfd_noexec(unsigned int *flags)
 	}
 
 	if (!(*flags & MFD_NOEXEC_SEAL) && sysctl >= MEMFD_NOEXEC_SCOPE_NOEXEC_ENFORCED) {
-		pr_err_ratelimited(
+		pr_warn_once(
 			"%s[%d]: memfd_create() requires MFD_NOEXEC_SEAL with vm.memfd_noexec=%d\n",
 			current->comm, task_pid_nr(current), sysctl);
 		return -EACCES;
