@@ -271,6 +271,7 @@ config GKI_HIDDEN_ANDROID_CONFIGS
 	select ANDROID_BINDERFS
 	select ANDROID_VENDOR_HOOKS
 	select ANDROID_DEBUG_KINFO
+	select FTRACE
 	help
 	  Dummy config option used to enable the hidden ANDROID configs,
 	  required by various SoC platforms
