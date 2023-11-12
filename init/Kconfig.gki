@@ -261,6 +261,17 @@ config GKI_TASK_STRUCT_VENDOR_SIZE_MAX
 	  task_struct dynamically when the GKI_DYNAMIC_TASK_STRUCT_SIZE
 	  option is enabled.
 
+config GKI_HIDDEN_ANDROID_CONFIGS
+	bool "Hidden ANDROID configuration needed for GKI"
+	select ASHMEM
+	select ANDROID_BINDER_IPC
+	select ANDROID_BINDERFS
+	select ANDROID_VENDOR_HOOKS
+	select ANDROID_DEBUG_KINFO
+	help
+	  Dummy config option used to enable the hidden ANDROID configs,
+	  required by various SoC platforms
+
 # Atrocities needed for
 # a) building GKI modules in separate tree, or
 # b) building drivers that are not modularizable
@@ -270,6 +281,7 @@ config GKI_TASK_STRUCT_VENDOR_SIZE_MAX
 #
 config GKI_HACKS_TO_FIX
 	bool "GKI Dummy config options"
+	select GKI_HIDDEN_ANDROID_CONFIGS
 	select GKI_HIDDEN_CRYPTO_CONFIGS
 	select GKI_HIDDEN_DRM_CONFIGS
 	select GKI_HIDDEN_MCP251XFD_CONFIGS
