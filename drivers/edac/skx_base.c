@@ -203,7 +203,7 @@ static int skx_get_dimm_config(struct mem_ctl_info *mci, struct res_config *cfg)
 			}
 		}
 		if (ndimms && !skx_check_ecc(mcmtr)) {
-			skx_printk(KERN_ERR, "ECC is disabled on imc %d\n", imc->mc);
+			skx_printk(KERN_NOTICE, "ECC is disabled on imc %d\n", imc->mc);
 			return -ENODEV;
 		}
 	}
