@@ -526,7 +526,7 @@ acpi_status acpi_ps_parse_aml(struct acpi_walk_state *walk_state)
 							    "Aborting method");
 				acpi_os_printf("\n");
 			} else {
-				ACPI_ERROR_METHOD("Aborting method",
+				ACPI_WARN_METHOD("Aborting method",
 						  walk_state->method_node, NULL,
 						  status);
 			}
