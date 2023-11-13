@@ -144,7 +144,7 @@ nvkm_subdev_init_(struct nvkm_subdev *subdev)
 	if (subdev->func->init) {
 		ret = subdev->func->init(subdev);
 		if (ret) {
-			nvkm_error(subdev, "init failed, %d\n", ret);
+			nvkm_warn(subdev, "init failed, %d\n", ret);
 			return ret;
 		}
 	}
