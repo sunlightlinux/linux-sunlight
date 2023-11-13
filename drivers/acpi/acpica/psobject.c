@@ -216,7 +216,9 @@ acpi_ps_build_named_op(struct acpi_walk_state *walk_state,
 
 	status = walk_state->descending_callback(walk_state, op);
 	if (ACPI_FAILURE(status)) {
-		if (status != AE_CTRL_TERMINATE) {
+		if ((status != AE_CTRL_TERMINATE)
+                   && (status != AE_ALREADY_EXISTS)
+                   && (status != AE_NOT_FOUND)) {
 			ACPI_EXCEPTION((AE_INFO, status,
 					"During name lookup/catalog"));
 		}
