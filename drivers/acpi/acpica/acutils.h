@@ -738,6 +738,13 @@ acpi_ut_method_error(const char *module_name,
 		     struct acpi_namespace_node *node,
 		     const char *path, acpi_status lookup_status);
 
+void
+acpi_ut_method_warn(const char *module_name,
+                     u32 line_number,
+                     const char *message,
+                     struct acpi_namespace_node *node,
+                     const char *path, acpi_status lookup_status);
+
 /*
  * Utility functions for ACPI names and IDs
  */
