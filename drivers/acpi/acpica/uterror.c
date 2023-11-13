@@ -188,7 +188,7 @@ acpi_ut_prefixed_namespace_error(const char *module_name,
 
 	case AE_NOT_FOUND:
 
-		acpi_os_printf(ACPI_MSG_BIOS_ERROR);
+		acpi_os_printf(ACPI_MSG_WARNING);
 		message = "Could not resolve symbol";
 		break;
 
@@ -322,6 +322,52 @@ acpi_ut_method_error(const char *module_name,
 
 	ACPI_MSG_SUFFIX;
 	ACPI_MSG_REDIRECT_END;
+}
+
+/*******************************************************************************
+ *
+ * FUNCTION:    acpi_ut_method_warn
+ *
+ * PARAMETERS:  module_name         - Caller's module name (for warning output)
+ *              line_number         - Caller's line number (for warning output)
+ *              message             - Warning message to use on failure
+ *              prefix_node         - Prefix relative to the path
+ *              path                - Path to the node (optional)
+ *              method_status       - Execution status
+ *
+ * RETURN:      None
+ *
+ * DESCRIPTION: Print warning message with the full pathname for the method.
+ *
+ ******************************************************************************/
+
+void
+acpi_ut_method_warn(const char *module_name,
+                     u32 line_number,
+                     const char *message,
+                     struct acpi_namespace_node *prefix_node,
+                     const char *path, acpi_status method_status)
+{
+        acpi_status status;
+        struct acpi_namespace_node *node = prefix_node;
+
+        ACPI_MSG_REDIRECT_BEGIN;
+        acpi_os_printf(ACPI_MSG_WARNING);
+
+        if (path) {
+                status = acpi_ns_get_node(prefix_node, path,
+                                          ACPI_NS_NO_UPSEARCH, &node);
+                if (ACPI_FAILURE(status)) {
+                        acpi_os_printf("[Could not get node by pathname]");
+                }
+        }
+
+        acpi_ns_print_node_pathname(node, message);
+        acpi_os_printf(" due to previous warning (%s)",
+                       acpi_format_exception(method_status));
+
+        ACPI_MSG_SUFFIX;
+        ACPI_MSG_REDIRECT_END;
 }
 
 #endif				/* ACPI_NO_ERROR_MESSAGES */
