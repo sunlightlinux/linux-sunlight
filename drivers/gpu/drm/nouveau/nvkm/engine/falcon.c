@@ -214,7 +214,7 @@ nvkm_falcon_init(struct nvkm_engine *engine)
 
 		ret = request_firmware(&fw, name, device->dev);
 		if (ret) {
-			nvkm_error(subdev, "unable to load firmware data\n");
+			nvkm_warn(subdev, "unable to load firmware data\n");
 			return -ENODEV;
 		}
 
@@ -229,7 +229,7 @@ nvkm_falcon_init(struct nvkm_engine *engine)
 
 		ret = request_firmware(&fw, name, device->dev);
 		if (ret) {
-			nvkm_error(subdev, "unable to load firmware code\n");
+			nvkm_warn(subdev, "unable to load firmware code\n");
 			return -ENODEV;
 		}
 
