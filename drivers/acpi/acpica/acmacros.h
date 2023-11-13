@@ -423,6 +423,7 @@
  */
 #define ACPI_ERROR_NAMESPACE(s, p, e)       acpi_ut_prefixed_namespace_error (AE_INFO, s, p, e);
 #define ACPI_ERROR_METHOD(s, n, p, e)       acpi_ut_method_error (AE_INFO, s, n, p, e);
+#define ACPI_WARN_METHOD(s, n, p, e)        acpi_ut_method_warn (AE_INFO, s, n, p, e);
 #define ACPI_WARN_PREDEFINED(plist)         acpi_ut_predefined_warning plist
 #define ACPI_INFO_PREDEFINED(plist)         acpi_ut_predefined_info plist
 #define ACPI_BIOS_ERROR_PREDEFINED(plist)   acpi_ut_predefined_bios_error plist
@@ -434,6 +435,7 @@
 
 #define ACPI_ERROR_NAMESPACE(s, p, e)
 #define ACPI_ERROR_METHOD(s, n, p, e)
+#define ACPI_WARN_METHOD(s, n, p, e)
 #define ACPI_WARN_PREDEFINED(plist)
 #define ACPI_INFO_PREDEFINED(plist)
 #define ACPI_BIOS_ERROR_PREDEFINED(plist)
