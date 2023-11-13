@@ -1181,9 +1181,7 @@ static bool report_idle_softirq(void)
 	if (local_bh_blocked())
 		return false;
 
-	if (ratelimit < 10) {
-		pr_warn("NOHZ tick-stop error: local softirq work is pending, handler #%02x!!!\n",
-			pending);
+	if (ratelimit < 250) {
 		ratelimit++;
 	}
 
