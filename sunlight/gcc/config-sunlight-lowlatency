@@ -1,6 +1,6 @@
 #
 # Automatically generated file; DO NOT EDIT.
-# Linux/x86_64 6.6.1 Kernel Configuration
+# Linux/x86_64 6.6.2 Kernel Configuration
 #
 CONFIG_CC_VERSION_TEXT="gcc (Debian 13.2.0-6) 13.2.0"
 CONFIG_CC_IS_GCC=y
@@ -10906,6 +10906,8 @@ CONFIG_OVERLAY_FS_XINO_AUTO=y
 # CONFIG_OVERLAY_FS_METACOPY is not set
 # CONFIG_OVERLAY_FS_DEBUG is not set
 CONFIG_INCREMENTAL_FS=y
+CONFIG_SHIFT_FS=y
+CONFIG_SHIFT_FS_POSIX_ACL=y
 
 #
 # Caches
