@@ -568,7 +568,7 @@ u64 irq_timings_next_event(u64 now)
 	 */
 	for_each_irqts(i, irqts) {
 		irq = irq_timing_decode(irqts->values[i], &ts);
-		s = idr_find(&irqt_stats, irq);
+		s = (__force typeof(s))idr_find(&irqt_stats, irq);
 		if (s)
 			irq_timings_store(irq, this_cpu_ptr(s), ts);
 	}
@@ -577,7 +577,7 @@ u64 irq_timings_next_event(u64 now)
 	 * Look in the list of interrupts' statistics, the earliest
 	 * next event.
 	 */
-	idr_for_each_entry(&irqt_stats, s, i) {
+	for (i = 0; (s = (__force typeof(s))idr_get_next(&irqt_stats, &i)) != NULL; i++) {
 
 		irqs = this_cpu_ptr(s);
 
@@ -596,7 +596,7 @@ void irq_timings_free(int irq)
 {
 	struct irqt_stat __percpu *s;
 
-	s = idr_find(&irqt_stats, irq);
+	s = (__force typeof(s))idr_find(&irqt_stats, irq);
 	if (s) {
 		free_percpu(s);
 		idr_remove(&irqt_stats, irq);
@@ -614,7 +614,7 @@ int irq_timings_alloc(int irq)
 	 * same interrupt number. Just bail out in case the per cpu
 	 * stat structure is already allocated.
 	 */
-	s = idr_find(&irqt_stats, irq);
+	s = (__force typeof(s))idr_find(&irqt_stats, irq);
 	if (s)
 		return 0;
 
@@ -623,7 +623,7 @@ int irq_timings_alloc(int irq)
 		return -ENOMEM;
 
 	idr_preload(GFP_KERNEL);
-	id = idr_alloc(&irqt_stats, s, irq, irq + 1, GFP_NOWAIT);
+	id = idr_alloc(&irqt_stats, (__force void *)s, irq, irq + 1, GFP_NOWAIT);
 	idr_preload_end();
 
 	if (id < 0) {
