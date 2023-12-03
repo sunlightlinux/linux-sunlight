@@ -5,7 +5,7 @@ config CPU_IDLE
 	bool "CPU idle PM support"
 	default y if ACPI || PPC_PSERIES
 	select CPU_IDLE_GOV_LADDER if (!NO_HZ && !NO_HZ_IDLE)
-	select CPU_IDLE_GOV_MENU if (NO_HZ || NO_HZ_IDLE) && !CPU_IDLE_GOV_TEO
+	select CPU_IDLE_GOV_MENU if (NO_HZ || NO_HZ_IDLE) && !CPU_IDLE_GOV_TEO && !CPU_IDLE_GOV_MOBILE
 	help
 	  CPU idle is a generic framework for supporting software-controlled
 	  idle processor power management.  It includes modular cross-platform
@@ -43,6 +43,15 @@ config CPU_IDLE_GOV_HALTPOLL
 	  state.
 
 	  Some virtualized workloads benefit from using it.
+
+config CPU_IDLE_GOV_MOBILE
+	bool "Mobile governor"
+	select IRQ_TIMINGS
+	help
+	  The mobile governor is based on irq timings measurements and
+	  pattern research combined with the next timer. This governor
+	  suits very well on embedded systems where the interrupts are
+	  grouped on a single core and the power is the priority.
 
 config DT_IDLE_STATES
 	bool
