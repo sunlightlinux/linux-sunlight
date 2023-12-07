@@ -276,6 +276,18 @@ config GKI_HIDDEN_ANDROID_CONFIGS
 	  Dummy config option used to enable the hidden ANDROID configs,
 	  required by various SoC platforms
 
+config GKI_HIDDEN_CPU_IDLE_GOV_CONFIGS
+	bool "Hidden CPU_IDLE_GOV configuration needed for GKI"
+	select CPU_IDLE
+	select CPU_IDLE_GOV_LADDER
+	select CPU_IDLE_GOV_MENU
+	select CPU_IDLE_GOV_TEO
+	select CPU_IDLE_GOV_HALTPOLL
+	select CPU_IDLE_GOV_MOBILE
+        help
+          Dummy config option used to enable the hidden CPU_IDLE_GOV configs,
+          required by various SoC platforms
+
 # Atrocities needed for
 # a) building GKI modules in separate tree, or
 # b) building drivers that are not modularizable
@@ -286,6 +298,7 @@ config GKI_HIDDEN_ANDROID_CONFIGS
 config GKI_HACKS_TO_FIX
 	bool "GKI Dummy config options"
 	select GKI_HIDDEN_ANDROID_CONFIGS
+	select GKI_HIDDEN_CPU_IDLE_GOV_CONFIGS
 	select GKI_HIDDEN_CRYPTO_CONFIGS
 	select GKI_HIDDEN_DRM_CONFIGS
 	select GKI_HIDDEN_MCP251XFD_CONFIGS
