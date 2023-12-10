@@ -120,6 +120,9 @@ static int mobile_select(struct cpuidle_driver *drv, struct cpuidle_device *dev,
 		if (dev->states_usage[i].disable)
 			continue;
 
+		if (s->power_usage <= -1 || s->power_usage > 0)
+			continue;
+
 		if (s->exit_latency > latency_req)
 			break;
 
