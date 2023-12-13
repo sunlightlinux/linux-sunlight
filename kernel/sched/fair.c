@@ -11474,7 +11474,7 @@ static int should_we_balance(struct lb_env *env)
 		 * balancing cores, but remember the first idle SMT CPU for
 		 * later consideration.  Find CPU on an idle core first.
 		 */
-		if (!(env->sd->flags & SD_SHARE_CPUCAPACITY) && !is_core_idle(cpu)) {
+		if (!(env->sd->flags & SD_SHARE_CPUCAPACITY) && !sched_smt_siblings_idle(cpu)) {
 			if (idle_smt == -1)
 				idle_smt = cpu;
 			/*
