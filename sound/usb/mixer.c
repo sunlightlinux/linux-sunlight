@@ -1231,11 +1231,6 @@ static void init_cur_mix_raw(struct usb_mixer_elem_info *cval, int ch, int idx)
 	err = snd_usb_get_cur_mix_value(cval, ch, idx, &val);
 	if (!err)
 		return;
-	if (!cval->head.mixer->ignore_ctl_error)
-		usb_audio_warn(cval->head.mixer->chip,
-			       "%d:%d: failed to get current value for ch %d (%d)\n",
-			       cval->head.id, mixer_ctrl_intf(cval->head.mixer),
-			       ch, err);
 	snd_usb_set_cur_mix_value(cval, ch, idx, cval->min);
 }
 
