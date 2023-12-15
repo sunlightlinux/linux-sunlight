@@ -331,7 +331,7 @@ fail_remove:
 fail_put:
 	module_put(drv->driver.owner);
 fail:
-	xenbus_dev_error(dev, err, "xenbus_dev_probe on %s", dev->nodename);
+	dev_warn(&dev->dev, "xenbus_dev_probe on %s.\n", dev->nodename);
 	return err;
 }
 EXPORT_SYMBOL_GPL(xenbus_dev_probe);
