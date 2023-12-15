@@ -1303,7 +1303,7 @@ static int btintel_read_debug_features(struct hci_dev *hdev,
 	skb = __hci_cmd_sync(hdev, 0xfca6, sizeof(page_no), &page_no,
 			     HCI_INIT_TIMEOUT);
 	if (IS_ERR(skb)) {
-		bt_dev_err(hdev, "Reading supported features failed (%ld)",
+		bt_dev_warn(hdev, "Reading supported features failed (%ld)",
 			   PTR_ERR(skb));
 		return PTR_ERR(skb);
 	}
