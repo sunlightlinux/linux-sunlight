@@ -316,7 +316,7 @@ static int piix4_setup(struct pci_dev *PIIX4_dev,
 			dev_notice(&PIIX4_dev->dev,
 				   "WARNING: SMBus interface has been FORCEFULLY ENABLED!\n");
 		} else {
-			dev_err(&PIIX4_dev->dev,
+			dev_warn(&PIIX4_dev->dev,
 				"SMBus Host Controller not enabled!\n");
 			release_region(piix4_smba, SMBIOSIZE);
 			return -ENODEV;
@@ -378,7 +378,7 @@ static int piix4_setup_sb800_smba(struct pci_dev *PIIX4_dev,
 	}
 
 	if (!*smb_en_status) {
-		dev_err(&PIIX4_dev->dev,
+		dev_warn(&PIIX4_dev->dev,
 			"SMBus Host Controller not enabled!\n");
 		return -ENODEV;
 	}
