@@ -3480,6 +3480,7 @@ void set_task_cpu(struct task_struct *p, unsigned int new_cpu)
 		rseq_migrate(p);
 		sched_mm_cid_migrate_from(p);
 		perf_event_task_migrate(p);
+		trace_android_rvh_set_task_cpu(p, new_cpu);
 	}
 
 	__set_task_cpu(p, new_cpu);
@@ -4434,6 +4435,8 @@ int try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 		 */
 		smp_cond_load_acquire(&p->on_cpu, !VAL);
 
+		trace_android_rvh_try_to_wake_up(p);
+
 		cpu = select_task_rq(p, p->wake_cpu, wake_flags | WF_TTWU);
 		if (task_cpu(p) != cpu) {
 			if (p->in_iowait) {
@@ -4452,9 +4455,10 @@ int try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 		ttwu_queue(p, cpu, wake_flags);
 	}
 out:
-	if (success)
+	if (success) {
+		trace_android_rvh_try_to_wake_up_success(p);
 		ttwu_stat(p, task_cpu(p), wake_flags);
-
+	}
 	return success;
 }
 
@@ -4997,6 +5001,8 @@ late_initcall(sched_core_sysctl_init);
  */
 int sched_fork(unsigned long clone_flags, struct task_struct *p)
 {
+	trace_android_rvh_sched_fork(p);
+
 	__sched_fork(clone_flags, p);
 	/*
 	 * We mark the process as NEW here. This guarantees that
@@ -5125,6 +5131,8 @@ void wake_up_new_task(struct task_struct *p)
 	struct rq_flags rf;
 	struct rq *rq;
 
+	trace_android_rvh_wake_up_new_task(p);
+
 	raw_spin_lock_irqsave(&p->pi_lock, rf.flags);
 	WRITE_ONCE(p->__state, TASK_RUNNING);
 #ifdef CONFIG_SMP
@@ -5143,6 +5151,7 @@ void wake_up_new_task(struct task_struct *p)
 	rq = __task_rq_lock(p, &rf);
 	update_rq_clock(rq);
 	post_init_entity_util_avg(p);
+	trace_android_rvh_new_task_stats(p);
 
 	activate_task(rq, p, ENQUEUE_NOCLOCK);
 	trace_sched_wakeup_new(p);
@@ -5560,6 +5569,8 @@ static struct rq *finish_task_switch(struct task_struct *prev)
 		if (prev->sched_class->task_dead)
 			prev->sched_class->task_dead(prev);
 
+		trace_android_rvh_flush_task(prev);
+
 		/* Task is done with its stack. */
 		put_task_stack(prev);
 
@@ -5935,6 +5946,7 @@ void scheduler_tick(bool user_tick)
 	rq_lock(rq, &rf);
 
 	update_rq_clock(rq);
+	trace_android_rvh_tick_entry(rq);
 
 	thermal_pressure = arch_scale_thermal_pressure(cpu_of(rq));
 	update_thermal_load_avg(rq_clock_thermal(rq), rq, thermal_pressure);
@@ -6952,6 +6964,7 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 	rq->last_seen_need_resched_ns = 0;
 #endif
 
+	trace_android_rvh_schedule(prev, next, rq);
 	if (likely(prev != next)) {
 		rq->nr_switches++;
 		/*
@@ -7736,8 +7749,13 @@ unsigned long effective_cpu_util(int cpu, unsigned long util_cfs,
 {
 	unsigned long dl_util, util, irq, max;
 	struct rq *rq = cpu_rq(cpu);
+	unsigned long new_util = ULONG_MAX;
 
 	max = arch_scale_cpu_capacity(cpu);
+
+	trace_android_rvh_effective_cpu_util(cpu, util_cfs, max, type, p, &new_util);
+	if (new_util != ULONG_MAX)
+		return new_util;
 
 	if (!uclamp_is_used() &&
 	    type == FREQUENCY_UTIL && rt_rq_is_runnable(&rq->rt)) {
@@ -10142,6 +10160,7 @@ int sched_cpu_starting(unsigned int cpu)
 	sched_core_cpu_starting(cpu);
 	sched_rq_cpu_starting(cpu);
 	sched_tick_start(cpu);
+	trace_android_rvh_sched_cpu_starting(cpu);
 	return 0;
 }
 
@@ -10214,6 +10233,8 @@ int sched_cpu_dying(unsigned int cpu)
 		dump_rq_tasks(rq, KERN_WARNING);
 	}
 	rq_unlock_irqrestore(rq, &rf);
+
+	trace_android_rvh_sched_cpu_dying(cpu);
 
 	calc_load_migrate(rq);
 	update_max_interval();
