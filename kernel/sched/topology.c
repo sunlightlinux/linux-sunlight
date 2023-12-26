@@ -7,6 +7,9 @@
 #include <trace/hooks/sched.h>
 
 DEFINE_MUTEX(sched_domains_mutex);
+#ifdef CONFIG_LOCKDEP
+EXPORT_SYMBOL_GPL(sched_domains_mutex);
+#endif
 
 /* Protected by sched_domains_mutex: */
 static cpumask_var_t sched_domains_tmpmask;
@@ -385,6 +388,7 @@ static bool build_perf_domains(const struct cpumask *cpu_map)
 	 * EAS is enabled for asymmetric CPU capacity topologies.
 	 * Allow vendor to override if desired.
 	 */
+	trace_android_rvh_build_perf_domains(&eas_check);
 	if (!per_cpu(sd_asym_cpucapacity, cpu) && !eas_check) {
 		if (sched_debug()) {
 			pr_info("rd %*pbl: CPUs do not have asymmetric capacities\n",
