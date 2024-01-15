@@ -273,6 +273,10 @@ static int mt7921_pci_probe(struct pci_dev *pdev,
 	int ret;
 	u16 cmd;
 
+	ret = pci_reset_function_locked(pdev);
+	if (ret)
+		pci_info(pdev, "Unable to perform FLR\n");
+
 	ret = pcim_enable_device(pdev);
 	if (ret)
 		return ret;
