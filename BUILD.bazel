@@ -103,6 +103,7 @@ filegroup(
     name = "aarch64_additional_kmi_symbol_lists",
     srcs = [
         # keep sorted
+        "android/abi_gki_aarch64_amlogic",
         "android/abi_gki_aarch64_db845c",
         "android/abi_gki_aarch64_pixel",
         "android/abi_gki_aarch64_unisoc",
@@ -119,6 +120,11 @@ define_common_kernels(target_configs = {
         "trim_nonlisted_kmi": True,
         "protected_exports_list": "android/abi_gki_protected_exports_aarch64",
         "protected_modules_list": "android/gki_aarch64_protected_modules",
+        "module_implicit_outs": get_gki_modules_list("arm64"),
+        "make_goals": _GKI_AARCH64_MAKE_GOALS,
+    },
+    "kernel_aarch64_16k": {
+        "kmi_symbol_list_strict_mode": False,
         "module_implicit_outs": get_gki_modules_list("arm64"),
         "make_goals": _GKI_AARCH64_MAKE_GOALS,
     },
@@ -2182,4 +2188,18 @@ zip_archive(
     name = "tests_zip_arm64",
     srcs = [":kselftest_tests_arm64"],
     out = "tests.zip",
+)
+
+copy_to_dist_dir(
+    name = "tests_zip_x86_64_dist",
+    data = [":tests_zip_x86_64"],
+    dist_dir = "out/tests_x86_64/dist",
+    flat = True,
+)
+
+copy_to_dist_dir(
+    name = "tests_zip_arm64_dist",
+    data = [":tests_zip_arm64"],
+    dist_dir = "out/tests_arm64/dist",
+    flat = True,
 )
