@@ -340,7 +340,7 @@ static ssize_t hugetlbfs_read_iter(struct kiocb *iocb, struct iov_iter *to)
 		} else {
 			folio_unlock(folio);
 
-			if (!folio_test_has_hwpoisoned(folio))
+			if (!folio_test_hwpoison(folio))
 				want = nr;
 			else {
 				/*
@@ -1129,8 +1129,8 @@ static int hugetlbfs_migrate_folio(struct address_space *mapping,
 #define hugetlbfs_migrate_folio NULL
 #endif
 
-static int hugetlbfs_error_remove_page(struct address_space *mapping,
-				struct page *page)
+static int hugetlbfs_error_remove_folio(struct address_space *mapping,
+				struct folio *folio)
 {
 	return 0;
 }
@@ -1277,7 +1277,7 @@ static const struct address_space_operations hugetlbfs_aops = {
 	.write_end	= hugetlbfs_write_end,
 	.dirty_folio	= noop_dirty_folio,
 	.migrate_folio  = hugetlbfs_migrate_folio,
-	.error_remove_page	= hugetlbfs_error_remove_page,
+	.error_remove_folio	= hugetlbfs_error_remove_folio,
 };
 
 
