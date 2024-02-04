@@ -200,7 +200,7 @@ inline struct futex_vector *futex_read_wait_block(u32 __user *uaddr, u32 count)
 int futex_wait_multiple(struct futex_vector *vs, unsigned int count,
 			struct hrtimer_sleeper *to);
 
-int futex_opcode_31(ktime_t *abs_time, u32 __user *uaddr, int count)
+static int futex_opcode_31(ktime_t *abs_time, u32 __user *uaddr, int count)
 {
 	int ret;
 	struct futex_vector *vs;
