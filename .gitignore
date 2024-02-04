@@ -53,6 +53,7 @@
 *.zst
 Module.symvers
 modules.order
+ksym-provides
 
 #
 # Top-level generic files
