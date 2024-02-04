@@ -54,6 +54,7 @@
 Module.symvers
 dtbs-list
 modules.order
+ksym-provides
 
 #
 # Top-level generic files
