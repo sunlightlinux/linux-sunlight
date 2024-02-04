@@ -5671,7 +5671,8 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 		update_idle_cfs_rq_clock_pelt(cfs_rq);
 }
 
-void set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
+static void
+set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
 	clear_buddies(cfs_rq, se);
 
@@ -5712,7 +5713,6 @@ void set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 
 	se->prev_sum_exec_runtime = se->sum_exec_runtime;
 }
-EXPORT_SYMBOL_GPL(set_next_entity);
 
 /*
  * Pick the next process, keeping these things in mind, in this order:
