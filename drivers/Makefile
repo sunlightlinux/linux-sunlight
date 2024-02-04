@@ -83,9 +83,8 @@ obj-$(CONFIG_ATA)		+= ata/
 # gpu/ comes after char for AGP vs DRM startup and after iommu
 obj-y				+= gpu/
 
-# i810fb and intelfb depend on char/agp/
+# i810fb depend on char/agp/
 obj-$(CONFIG_FB_I810)           += video/fbdev/i810/
-obj-$(CONFIG_FB_INTEL)          += video/fbdev/intelfb/
 
 obj-$(CONFIG_TARGET_CORE)	+= target/
 obj-$(CONFIG_MTD)		+= mtd/
