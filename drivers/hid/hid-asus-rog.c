@@ -1454,7 +1454,7 @@ err_stop_hw:
 	return ret;
 }
 
-void asus_rog_ally_remove(struct hid_device *hdev, const struct rog_ops *ops)
+static void asus_rog_ally_remove(struct hid_device *hdev, const struct rog_ops *ops)
 {
 	struct asus_drvdata *drvdata = hid_get_drvdata(hdev);
 	if (drvdata->rog_ally_data) {
