@@ -1,0 +1,2 @@
+config SUNLIGHT_KERNEL
+	def_bool y
