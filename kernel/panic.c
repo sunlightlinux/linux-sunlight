@@ -496,6 +496,9 @@ const struct taint_flag taint_flags[TAINT_FLAGS_COUNT] = {
 	[ TAINT_AUX ]			= { 'X', ' ', true },
 	[ TAINT_RANDSTRUCT ]		= { 'T', ' ', true },
 	[ TAINT_TEST ]			= { 'N', ' ', true },
+#ifdef CONFIG_SUNLIGHT_KERNEL_SUPPORTED
+	[ TAINT_NO_SUPPORT ]		= { 'n', ' ', true },
+#endif
 };
 
 /**
