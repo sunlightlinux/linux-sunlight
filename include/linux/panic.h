@@ -36,6 +36,10 @@ extern bool crash_kexec_post_notifiers;
 extern void __stack_chk_fail(void);
 void abort(void);
 
+#ifdef CONFIG_SUNLIGHT_KERNEL_SUPPORTED
+extern int sunlight_unsupported;
+#endif
+
 /*
  * panic_cpu is used for synchronizing panic() and crash_kexec() execution. It
  * holds a CPU number which is executing panic() currently. A value of
@@ -76,6 +80,20 @@ static inline void set_arch_panic_timeout(int timeout, int arch_default_timeout)
 #define TAINT_TEST			18
 #define TAINT_FLAGS_COUNT		19
 #define TAINT_FLAGS_MAX			((1UL << TAINT_FLAGS_COUNT) - 1)
+
+#ifdef CONFIG_SUNLIGHT_KERNEL_SUPPORTED
+/*
+ * Take the upper bits to hopefully allow them
+ * to stay the same for more than one release.
+ */
+#  define TAINT_EXTERNAL_SUPPORT	TAINT_AUX
+#  define TAINT_NO_SUPPORT		31
+#  if TAINT_FLAGS_COUNT >= TAINT_NO_SUPPORT
+#    error Upstream taint flags overlap with SUNLIGHT flags
+#  endif
+#  undef TAINT_FLAGS_COUNT
+#  define TAINT_FLAGS_COUNT		32
+#endif
 
 struct taint_flag {
 	char c_true;		/* character printed when tainted */
