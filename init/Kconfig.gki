@@ -151,7 +151,7 @@ config GKI_LEGACY_WEXT_ALLCONFIG
 	  out-of-kernel built wireless modules, say N here.
 
 config GKI_HIDDEN_USB_CONFIGS
-	bool "Hiddel USB configurations needed for GKI"
+	bool "Hidden USB configurations needed for GKI"
 	select USB_PHY
 	select USB_CONFIGFS_UEVENT
 	help
