@@ -1,6 +1,75 @@
 config SUNLIGHT_KERNEL
 	def_bool y
 
+menu "SUNLIGHT Release Details"
+choice
+	prompt "SUNLIGHT Product Family"
+	default SUNLIGHT_PRODUCT_OPENSUNLIGHT_ROLLING
+	depends on SUNLIGHT_KERNEL
+	help
+	  This option defines the SUNLIGHT product family that owns this
+	  kernel release.
+
+config SUNLIGHT_PRODUCT_ENTERPRISE
+	bool "SUNLIGHT Linux Enteprise"
+
+config SUNLIGHT_PRODUCT_OPENSUNLIGHT_STABLE
+	bool "openSUNLIGHT Stable"
+
+config SUNLIGHT_PRODUCT_OPENSUNLIGHT_ROLLING
+	bool "openSUNLIGHT Rolling"
+endchoice
+
+config SUNLIGHT_PRODUCT_CODE
+	int
+	range 1 3
+	default 1 if SUNLIGHT_PRODUCT_ENTERPRISE
+	default 2 if SUNLIGHT_PRODUCT_OPENSUNLIGHT_STABLE
+	default 3 if SUNLIGHT_PRODUCT_OPENSUNLIGHT_ROLLING
+
+if SUNLIGHT_PRODUCT_ENTERPRISE
+config SUNLIGHT_VERSION
+	int "Release Version"
+	range 0 255
+	default 255
+
+config SUNLIGHT_PATCHLEVEL
+	int "Service Pack Version"
+	range 0 255
+	default 255
+endif
+
+if SUNLIGHT_PRODUCT_OPENSUNLIGHT_STABLE
+config SUNLIGHT_VERSION
+	int "Release Major Version"
+	range 0 255
+	default 255
+
+config SUNLIGHT_PATCHLEVEL
+	int "Release Minor Version"
+	range 0 255
+	default 255
+endif
+
+# Rolling doesn't currently use version information, but we should
+# still have the values defined even if zeroed out.
+if SUNLIGHT_PRODUCT_OPENSUNLIGHT_ROLLING
+config SUNLIGHT_VERSION
+	int
+	range 0 255
+	default 0
+
+config SUNLIGHT_PATCHLEVEL
+	int
+	range 0 255
+	default 0
+endif
+
+config SUNLIGHT_AUXRELEASE
+	int
+	range 0 255
+	default 0
+
 config SUNLIGHT_KERNEL_SUPPORTED
 	bool "Enable enterprise support facility"
 	depends on SUNLIGHT_KERNEL
@@ -19,3 +88,4 @@ config SUNLIGHT_KERNEL_SUPPORTED
 	  If you aren't building a kernel for an enterprise distribution,
 	  say n.
 
+endmenu
