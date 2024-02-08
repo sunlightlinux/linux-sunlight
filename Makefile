@@ -1163,6 +1163,15 @@ endif
 	$(Q)$(MAKE) $(hdr-inst)=$(hdr-prefix)include/uapi
 	$(Q)$(MAKE) $(hdr-inst)=$(hdr-prefix)arch/$(SRCARCH)/include/uapi
 
+sunlight_version_h := include/generated/uapi/linux/sunlight_version.h
+
+define filechk_sunlight_version
+	$(CONFIG_SHELL) $(srctree)/scripts/gen-sunlight_version_h.sh
+endef
+
+$(sunlight_version_h): include/config/auto.conf FORCE
+	$(call filechk,sunlight_version)
+
 ifeq ($(KBUILD_EXTMOD),)
 
 build-dir	:= .
@@ -1259,7 +1268,8 @@ PHONY += prepare archprepare
 
 archprepare: outputmakefile archheaders archscripts scripts include/config/kernel.release \
 	asm-generic $(version_h) include/generated/utsrelease.h \
-	include/generated/compile.h include/generated/autoconf.h remove-stale-files
+	include/generated/compile.h include/generated/autoconf.h remove-stale-files \
+	$(sunlight_version_h)
 
 prepare0: archprepare
 	$(Q)$(MAKE) $(build)=scripts/mod
