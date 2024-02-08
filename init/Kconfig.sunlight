@@ -88,4 +88,10 @@ config SUNLIGHT_KERNEL_SUPPORTED
 	  If you aren't building a kernel for an enterprise distribution,
 	  say n.
 
+config SUNLIGHT_KERNEL_RELEASED
+	bool "Release kernel"
+	default n
+	help
+	  This kernel is built for release through official channels.
+
 endmenu
