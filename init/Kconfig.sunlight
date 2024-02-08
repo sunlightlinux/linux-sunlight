@@ -19,6 +19,8 @@ config SUNLIGHT_PRODUCT_OPENSUNLIGHT_STABLE
 config SUNLIGHT_PRODUCT_OPENSUNLIGHT_ROLLING
 	bool "openSUNLIGHT Rolling"
 
+endchoice
+
 config SUNLIGHT_PRODUCT_CODE
 	int
 	range 1 3
@@ -71,7 +73,7 @@ config SUNLIGHT_AUXRELEASE
 
 config SUNLIGHT_KERNEL_SUPPORTED
 	bool "Enable enterprise support facility"
-	depends on SUNKIGHT_KERNEL
+	depends on SUNLIGHT_KERNEL
 	depends on MODULES
 	help
 	  This feature enables the handling of the "supported" module flag.
