@@ -1259,6 +1259,32 @@ export extmod_prefix = $(if $(KBUILD_EXTMOD),$(KBUILD_EXTMOD)/)
 export MODORDER := $(extmod_prefix)modules.order
 export MODULES_NSDEPS := $(extmod_prefix)modules.nsdeps
 
+# ---------------------------------------------------------------------------
+# Kernel headers
+
+PHONY += headers
+
+#Default location for installed headers
+ifeq ($(KBUILD_EXTMOD),)
+PHONY += archheaders archscripts
+hdr-inst := -f $(srctree)/scripts/Makefile.headersinst obj
+headers: $(version_h) scripts_unifdef uapi-asm-generic archheaders archscripts
+else
+hdr-prefix = $(KBUILD_EXTMOD)/
+hdr-inst := -f $(srctree)/scripts/Makefile.headersinst dst=$(KBUILD_EXTMOD)/usr/include objtree=$(objtree)/$(KBUILD_EXTMOD) obj
+endif
+
+export INSTALL_HDR_PATH = $(objtree)/$(hdr-prefix)usr
+
+sunlight_version_h := include/generated/uapi/linux/sunlight_version.h
+
+define filechk_sunlight_version
+	$(CONFIG_SHELL) $(srctree)/scripts/gen-sunlight_version_h.sh
+endef
+
+$(sunlight_version_h): include/config/auto.conf FORCE
+	$(call filechk,sunlight_version)
+
 ifeq ($(KBUILD_EXTMOD),)
 
 build-dir	:= .
@@ -1353,7 +1379,8 @@ PHONY += prepare archprepare
 
 archprepare: outputmakefile archheaders archscripts scripts include/config/kernel.release \
 	asm-generic $(version_h) include/generated/utsrelease.h \
-	include/generated/compile.h include/generated/autoconf.h remove-stale-files
+	include/generated/compile.h include/generated/autoconf.h remove-stale-files \
+	$(sunlight_version_h)
 
 prepare0: archprepare
 	$(Q)$(MAKE) $(build)=scripts/mod
