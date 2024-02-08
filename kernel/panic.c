@@ -531,6 +531,8 @@ static void print_tainted_seq(struct seq_buf *s, bool verbose)
 		bool is_set = test_bit(i, &tainted_mask);
 		char c = is_set ? t->c_true : t->c_false;
 
+		if (!c)
+			continue;
 		if (verbose) {
 			if (is_set) {
 				seq_buf_printf(s, "%s[%c]=%s", sep, c, t->desc);
