@@ -4035,7 +4035,7 @@ static void reweight_eevdf(struct cfs_rq *cfs_rq, struct sched_entity *se,
 #ifdef CONFIG_SCHED_BORE
 	if (unlikely(!sched_bore) || se->deadline > avruntime + vslice)
 #endif // CONFIG_SCHED_BORE
-	se->deadline = avruntime + vslice;
+	se->deadline = min_vruntime(se->deadline, avruntime + vslice);
 }
 
 static void reweight_entity(struct cfs_rq *cfs_rq, struct sched_entity *se,
