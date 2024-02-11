@@ -5195,6 +5195,8 @@ static int ufshcd_slave_alloc(struct scsi_device *sdev)
 
 	ufshcd_setup_links(hba, sdev);
 
+	trace_android_vh_ufs_update_sdev(sdev);
+
 	return 0;
 }
 
