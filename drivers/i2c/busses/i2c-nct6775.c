@@ -645,3 +645,4 @@ MODULE_DESCRIPTION("SMBus driver for NCT6775F and compatible chips");
 MODULE_LICENSE("GPL");
 
 module_init(i2c_nct6775_init);
+module_exit(i2c_nct6775_exit);
