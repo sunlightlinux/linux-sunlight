@@ -934,9 +934,7 @@ static bool nbcon_emit_next_record(struct nbcon_write_context *wctxt, bool use_a
 		done = con->write_atomic(con, wctxt);
 
 	} else if (!use_atomic &&
-		   con->write_thread &&
-		   con->kthread) {
-		WARN_ON_ONCE(con->kthread != current);
+		   con->write_thread) {
 		done = con->write_thread(con, wctxt);
 	}
 
@@ -1166,10 +1164,11 @@ static __ref unsigned int *nbcon_get_cpu_emergency_nesting(void)
 }
 
 /**
- * nbcon_atomic_emit_one - Print one record for an nbcon console using the
- *				write_atomic() callback
+ * nbcon_emit_one - Print one record for an nbcon console using the
+ *			specified callback
  * @wctxt:	An initialized write context struct to use
  *		for this context
+ * @use_atomic:	True if the write_atomic callback is to be used
  *
  * Return:	False if the given console could not print a record or there
  *		are no more records to print, otherwise true.
@@ -1177,7 +1176,7 @@ static __ref unsigned int *nbcon_get_cpu_emergency_nesting(void)
  * This is an internal helper to handle the locking of the console before
  * calling nbcon_emit_next_record().
  */
-static bool nbcon_atomic_emit_one(struct nbcon_write_context *wctxt)
+static bool nbcon_emit_one(struct nbcon_write_context *wctxt, bool use_atomic)
 {
 	struct nbcon_context *ctxt = &ACCESS_PRIVATE(wctxt, ctxt);
 
@@ -1189,7 +1188,7 @@ static bool nbcon_atomic_emit_one(struct nbcon_write_context *wctxt)
 	 * handed over or taken over. In both cases the context is no
 	 * longer valid.
 	 */
-	if (!nbcon_emit_next_record(wctxt, true))
+	if (!nbcon_emit_next_record(wctxt, use_atomic))
 		return false;
 
 	nbcon_context_release(ctxt);
@@ -1220,53 +1219,55 @@ enum nbcon_prio nbcon_get_default_prio(void)
 }
 
 /**
- * nbcon_atomic_emit_next_record - Print one record for an nbcon console
- *					using the write_atomic() callback
+ * nbcon_legacy_emit_next_record - Print one record for an nbcon console
+ *					in legacy contexts
  * @con:	The console to print on
  * @handover:	Will be set to true if a printk waiter has taken over the
  *		console_lock, in which case the caller is no longer holding
  *		both the console_lock and the SRCU read lock. Otherwise it
  *		is set to false.
  * @cookie:	The cookie from the SRCU read lock.
+ * @use_atomic:	True if the write_atomic callback is to be used
  *
  * Context:	Any context which could not be migrated to another CPU.
  * Return:	True if a record could be printed, otherwise false.
  *
  * This function is meant to be called by console_flush_all() to print records
- * on nbcon consoles using the write_atomic() callback. Essentially it is the
- * nbcon version of console_emit_next_record().
+ * on nbcon consoles from legacy context (printing via console unlocking).
+ * Essentially it is the nbcon version of console_emit_next_record().
  */
-bool nbcon_atomic_emit_next_record(struct console *con, bool *handover, int cookie)
+bool nbcon_legacy_emit_next_record(struct console *con, bool *handover,
+				   int cookie, bool use_atomic)
 {
 	struct nbcon_write_context wctxt = { };
 	struct nbcon_context *ctxt = &ACCESS_PRIVATE(&wctxt, ctxt);
-	unsigned long driver_flags;
 	bool progress = false;
 	unsigned long flags;
 
 	*handover = false;
 
-	/* Use the same locking order as console_emit_next_record(). */
-	if (!IS_ENABLED(CONFIG_PREEMPT_RT)) {
+	ctxt->console = con;
+
+	if (use_atomic) {
+		/* Use the same procedure as console_emit_next_record(). */
 		printk_safe_enter_irqsave(flags);
 		console_lock_spinning_enable();
 		stop_critical_timings();
-	}
 
-	con->driver_enter(con, &driver_flags);
-	cant_migrate();
+		ctxt->prio = nbcon_get_default_prio();
+		progress = nbcon_emit_one(&wctxt, use_atomic);
 
-	ctxt->console	= con;
-	ctxt->prio	= nbcon_get_default_prio();
-
-	progress = nbcon_atomic_emit_one(&wctxt);
-
-	con->driver_exit(con, driver_flags);
-
-	if (!IS_ENABLED(CONFIG_PREEMPT_RT)) {
 		start_critical_timings();
 		*handover = console_lock_spinning_disable_and_check(cookie);
 		printk_safe_exit_irqrestore(flags);
+	} else {
+		con->driver_enter(con, &flags);
+		cant_migrate();
+
+		ctxt->prio = nbcon_get_default_prio();
+		progress = nbcon_emit_one(&wctxt, use_atomic);
+
+		con->driver_exit(con, flags);
 	}
 
 	return progress;
@@ -1323,7 +1324,7 @@ static void __nbcon_atomic_flush_all(u64 stop_seq, bool allow_unsafe_takeover)
 
 			ctxt->prio = nbcon_get_default_prio();
 
-			any_progress |= nbcon_atomic_emit_one(&wctxt);
+			any_progress |= nbcon_emit_one(&wctxt, true);
 
 			local_irq_restore(irq_flags);
 		}
@@ -1473,7 +1474,7 @@ static int __init printk_setup_threads(void)
 	printk_threads_enabled = true;
 	for_each_console(con)
 		nbcon_kthread_create(con);
-	if (IS_ENABLED(CONFIG_PREEMPT_RT) && printing_via_unlock)
+	if (force_printkthreads() && printing_via_unlock)
 		nbcon_legacy_kthread_create();
 	console_list_unlock();
 	return 0;
@@ -1566,7 +1567,7 @@ static inline bool uart_is_nbcon(struct uart_port *up)
 }
 
 /**
- * nbcon_acquire - The second half of the port locking wrapper
+ * uart_nbcon_acquire - The second half of the port locking wrapper
  * @up:		The uart port whose @lock was locked
  *
  * The uart_port_lock() wrappers will first lock the spin_lock @up->lock.
@@ -1578,7 +1579,7 @@ static inline bool uart_is_nbcon(struct uart_port *up)
  * nbcon consoles acquired via the port lock wrapper always use priority
  * NBCON_PRIO_NORMAL.
  */
-void nbcon_acquire(struct uart_port *up)
+void uart_nbcon_acquire(struct uart_port *up)
 {
 	struct console *con = up->cons;
 	struct nbcon_context ctxt;
@@ -1599,10 +1600,10 @@ void nbcon_acquire(struct uart_port *up)
 
 	up->nbcon_locked_port = true;
 }
-EXPORT_SYMBOL_GPL(nbcon_acquire);
+EXPORT_SYMBOL_GPL(uart_nbcon_acquire);
 
 /**
- * nbcon_release - The first half of the port unlocking wrapper
+ * uart_nbcon_release - The first half of the port unlocking wrapper
  * @up:		The uart port whose @lock is about to be unlocked
  *
  * The uart_port_unlock() wrappers will first call this function to implement
@@ -1615,7 +1616,7 @@ EXPORT_SYMBOL_GPL(nbcon_acquire);
  * nbcon consoles acquired via the port lock wrapper always use priority
  * NBCON_PRIO_NORMAL.
  */
-void nbcon_release(struct uart_port *up)
+void uart_nbcon_release(struct uart_port *up)
 {
 	struct console *con = up->cons;
 	struct nbcon_context ctxt = {
@@ -1631,7 +1632,7 @@ void nbcon_release(struct uart_port *up)
 
 	up->nbcon_locked_port = false;
 }
-EXPORT_SYMBOL_GPL(nbcon_release);
+EXPORT_SYMBOL_GPL(uart_nbcon_release);
 
 /**
  * printk_kthread_shutdown - shutdown all threaded printers

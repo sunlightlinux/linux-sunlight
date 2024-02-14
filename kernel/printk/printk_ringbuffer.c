@@ -1857,8 +1857,6 @@ static bool copy_data(struct prb_data_ring *data_ring,
  * descriptor. However, it also verifies that the record is finalized and has
  * the sequence number @seq. On success, 0 is returned.
  *
- * For the panic CPU, committed descriptors are also considered finalized.
- *
  * Error return values:
  * -EINVAL: A finalized record with sequence number @seq does not exist.
  * -ENOENT: A finalized record with sequence number @seq exists, but its data
@@ -1877,24 +1875,15 @@ static int desc_read_finalized_seq(struct prb_desc_ring *desc_ring,
 
 	/*
 	 * An unexpected @id (desc_miss) or @seq mismatch means the record
-	 * does not exist. A descriptor in the reserved state means the
-	 * record does not yet exist for the reader.
+	 * does not exist. A descriptor in the reserved or committed state
+	 * means the record does not yet exist for the reader.
 	 */
 	if (d_state == desc_miss ||
 	    d_state == desc_reserved ||
+	    d_state == desc_committed ||
 	    s != seq) {
 		return -EINVAL;
 	}
-
-	/*
-	 * A descriptor in the committed state means the record does not yet
-	 * exist for the reader. However, for the panic CPU, committed
-	 * records are also handled as finalized records since they contain
-	 * message data in a consistent state and may contain additional
-	 * hints as to the cause of the panic.
-	 */
-	if (d_state == desc_committed && !this_cpu_in_panic())
-		return -EINVAL;
 
 	/*
 	 * A descriptor in the reusable state may no longer have its data
@@ -2035,8 +2024,8 @@ try_again:
 	last_finalized_seq = desc_last_finalized_seq(rb);
 
 	/*
-	 * @head_id is loaded after @last_finalized_seq to ensure that it is
-	 * at or beyond @last_finalized_seq.
+	 * @head_id is loaded after @last_finalized_seq to ensure that
+	 * it points to the record with @last_finalized_seq or newer.
 	 *
 	 * Memory barrier involvement:
 	 *
@@ -2069,25 +2058,20 @@ try_again:
 	if (err == -EINVAL) {
 		if (last_finalized_seq == 0) {
 			/*
-			 * @last_finalized_seq still contains its initial
-			 * value. Probably no record has been finalized yet.
-			 * This means the ringbuffer is not yet full and the
-			 * @head_id value can be used directly (subtracting
-			 * off the id value corresponding to seq=0).
-			 */
-
-			/*
-			 * Because of hack#2 of the bootstrapping phase, the
-			 * @head_id initial value must be handled separately.
+			 * No record has been finalized or even reserved yet.
+			 *
+			 * The @head_id is initialized such that the first
+			 * increment will yield the first record (seq=0).
+			 * Handle it separately to avoid a negative @diff
+			 * below.
 			 */
 			if (head_id == DESC0_ID(desc_ring->count_bits))
 				return 0;
 
 			/*
-			 * The @head_id is initialized such that the first
-			 * increment will yield the first record (seq=0).
-			 * Therefore use the initial value +1 as the base to
-			 * subtract from @head_id.
+			 * One or more descriptors are already reserved. Use
+			 * the descriptor ID of the first one (@seq=0) for
+			 * the @diff below.
 			 */
 			last_finalized_id = DESC0_ID(desc_ring->count_bits) + 1;
 		} else {
@@ -2096,10 +2080,7 @@ try_again:
 		}
 	}
 
-	/*
-	 * @diff is the number of records beyond the last record available
-	 * to readers.
-	 */
+	/* Diff of known descriptor IDs to compute related sequence numbers. */
 	diff = head_id - last_finalized_id;
 
 	/*

@@ -3293,6 +3293,7 @@ void serial8250_init_port(struct uart_8250_port *up)
 	struct uart_port *port = &up->port;
 
 	spin_lock_init(&port->lock);
+	port->nbcon_locked_port = false;
 	port->ctrl_id = 0;
 	port->pm = NULL;
 	port->ops = &serial8250_pops;
