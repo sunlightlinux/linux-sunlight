@@ -281,7 +281,7 @@ static void intel_vblank_section_enter_irqsave(struct drm_i915_private *i915, un
 #ifdef I915
 	spin_lock_irqsave(&i915->uncore.lock, *flags);
 #else
-	*flags = NULL;
+	*flags = 0;
 #endif
 }
 
@@ -292,7 +292,7 @@ static void intel_vblank_section_exit_irqrestore(struct drm_i915_private *i915, 
 	spin_unlock_irqrestore(&i915->uncore.lock, flags);
 #else
 	if (flags)
-		;
+		return;
 #endif
 }
 static void intel_vblank_section_enter(struct drm_i915_private *i915)
