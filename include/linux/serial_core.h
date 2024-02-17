@@ -488,6 +488,7 @@ struct uart_port {
 	struct uart_icount	icount;			/* statistics */
 
 	struct console		*cons;			/* struct console, if any */
+	bool			nbcon_locked_port;	/* True, if the port is locked by nbcon */
 	/* flags must be updated while holding port mutex */
 	upf_t			flags;
 
@@ -595,6 +596,7 @@ struct uart_port {
 static inline void uart_port_lock(struct uart_port *up)
 {
 	spin_lock(&up->lock);
+	nbcon_acquire(up);
 }
 
 /**
@@ -604,6 +606,7 @@ static inline void uart_port_lock(struct uart_port *up)
 static inline void uart_port_lock_irq(struct uart_port *up)
 {
 	spin_lock_irq(&up->lock);
+	nbcon_acquire(up);
 }
 
 /**
@@ -614,6 +617,7 @@ static inline void uart_port_lock_irq(struct uart_port *up)
 static inline void uart_port_lock_irqsave(struct uart_port *up, unsigned long *flags)
 {
 	spin_lock_irqsave(&up->lock, *flags);
+	nbcon_acquire(up);
 }
 
 /**
@@ -624,7 +628,11 @@ static inline void uart_port_lock_irqsave(struct uart_port *up, unsigned long *f
  */
 static inline bool uart_port_trylock(struct uart_port *up)
 {
-	return spin_trylock(&up->lock);
+	if (!spin_trylock(&up->lock))
+		return false;
+
+	nbcon_acquire(up);
+	return true;
 }
 
 /**
@@ -636,7 +644,11 @@ static inline bool uart_port_trylock(struct uart_port *up)
  */
 static inline bool uart_port_trylock_irqsave(struct uart_port *up, unsigned long *flags)
 {
-	return spin_trylock_irqsave(&up->lock, *flags);
+	if (!spin_trylock_irqsave(&up->lock, *flags))
+		return false;
+
+	nbcon_acquire(up);
+	return true;
 }
 
 /**
@@ -645,6 +657,7 @@ static inline bool uart_port_trylock_irqsave(struct uart_port *up, unsigned long
  */
 static inline void uart_port_unlock(struct uart_port *up)
 {
+	nbcon_release(up);
 	spin_unlock(&up->lock);
 }
 
@@ -654,6 +667,7 @@ static inline void uart_port_unlock(struct uart_port *up)
  */
 static inline void uart_port_unlock_irq(struct uart_port *up)
 {
+	nbcon_release(up);
 	spin_unlock_irq(&up->lock);
 }
 
@@ -663,6 +677,19 @@ static inline void uart_port_unlock_irq(struct uart_port *up)
  * @flags:	The saved interrupt flags for restore
  */
 static inline void uart_port_unlock_irqrestore(struct uart_port *up, unsigned long flags)
+{
+	nbcon_release(up);
+	spin_unlock_irqrestore(&up->lock, flags);
+}
+
+/* Only for use in the console->driver_enter() callback. */
+static inline void __uart_port_lock_irqsave(struct uart_port *up, unsigned long *flags)
+{
+	spin_lock_irqsave(&up->lock, *flags);
+}
+
+/* Only for use in the console->driver_exit() callback. */
+static inline void __uart_port_unlock_irqrestore(struct uart_port *up, unsigned long flags)
 {
 	spin_unlock_irqrestore(&up->lock, flags);
 }
