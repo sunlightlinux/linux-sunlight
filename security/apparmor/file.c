@@ -775,14 +775,14 @@ static int __file_mqueue_perm(const char *op, const struct cred *subj_cred,
 }
 
 /* wrapper fn to indicate semantics of the check */
-bool __subj_label_is_cached(struct aa_label *subj_label,
+static bool __subj_label_is_cached(struct aa_label *subj_label,
 			    struct aa_label *obj_label)
 {
 	return aa_label_is_subset(obj_label, subj_label);
 }
 
 /* for now separate fn to indicate semantics of the check */
-bool __file_is_delegated(struct aa_label *obj_label)
+static bool __file_is_delegated(struct aa_label *obj_label)
 {
 	return unconfined(obj_label);
 }

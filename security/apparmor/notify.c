@@ -70,15 +70,6 @@ static void __list_append_held(struct list_head *lh, struct aa_knotif *knotif)
 	knotif->flags |= KNOTIF_ON_LIST;
 }
 
-static void __list_push_held(struct list_head *lh, struct aa_knotif *knotif)
-{
-	AA_BUG(!lh);
-	AA_BUG(!knotif);
-
-	list_add_entry(knotif, lh, list);
-	knotif->flags |= KNOTIF_ON_LIST;
-}
-
 static void __listener_add_knotif(struct aa_listener *listener,
 				  struct aa_knotif *knotif)
 {
@@ -288,7 +279,7 @@ out:
 }
 
 // don't drop refcounts
-struct aa_knotif *listener_pop_and_hold_knotif(struct aa_listener *listener)
+static struct aa_knotif *listener_pop_and_hold_knotif(struct aa_listener *listener)
 {
 	struct aa_knotif *knotif = NULL;
 
@@ -303,19 +294,8 @@ struct aa_knotif *listener_pop_and_hold_knotif(struct aa_listener *listener)
 }
 
 // require refcounts held
-void listener_push_held_knotif(struct aa_listener *listener,
-			       struct aa_knotif *knotif)
-{
-	spin_lock(&listener->lock);
-	/* listener ref held from pop and hold */
-	__list_push_held(&listener->notifications, knotif);
-	spin_unlock(&listener->lock);
-	wake_up_interruptible_poll(&listener->wait, EPOLLIN | EPOLLRDNORM);
-}
-
-// require refcounts held
 // list of knotifs waiting for response
-void listener_append_held_user_pending(struct aa_listener *listener,
+static void listener_append_held_user_pending(struct aa_listener *listener,
 				       struct aa_knotif *knotif)
 {
 	spin_lock(&listener->lock);
@@ -326,7 +306,7 @@ void listener_append_held_user_pending(struct aa_listener *listener,
 }
 
 // don't drop refcounts
-struct aa_knotif *__del_and_hold_user_pending(struct aa_listener *listener,
+static struct aa_knotif *__del_and_hold_user_pending(struct aa_listener *listener,
 					      u64 id)
 {
 	struct aa_knotif *knotif;
