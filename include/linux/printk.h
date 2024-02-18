@@ -198,8 +198,8 @@ extern asmlinkage void dump_stack_lvl(const char *log_lvl) __cold;
 extern asmlinkage void dump_stack(void) __cold;
 void printk_trigger_flush(void);
 void printk_legacy_allow_panic_sync(void);
-extern void nbcon_acquire(struct uart_port *up);
-extern void nbcon_release(struct uart_port *up);
+extern void uart_nbcon_acquire(struct uart_port *up);
+extern void uart_nbcon_release(struct uart_port *up);
 void nbcon_atomic_flush_unsafe(void);
 #else
 static inline __printf(1, 0)
@@ -285,11 +285,11 @@ static inline void printk_legacy_allow_panic_sync(void)
 {
 }
 
-static inline void nbcon_acquire(struct uart_port *up)
+static inline void uart_nbcon_acquire(struct uart_port *up)
 {
 }
 
-static inline void nbcon_release(struct uart_port *up)
+static inline void uart_nbcon_release(struct uart_port *up)
 {
 }
 
@@ -298,6 +298,8 @@ static inline void nbcon_atomic_flush_unsafe(void)
 }
 
 #endif
+
+bool this_cpu_in_panic(void);
 
 #ifdef CONFIG_SMP
 extern int __printk_cpu_sync_try_get(void);

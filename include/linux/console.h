@@ -139,7 +139,7 @@ static inline int con_debug_leave(void)
  */
 
 /**
- * cons_flags - General console flags
+ * enum cons_flags - General console flags
  * @CON_PRINTBUFFER:	Used by newly registered consoles to avoid duplicate
  *			output of messages that were already shown by boot
  *			consoles or read by userspace via syslog() syscall.
@@ -220,7 +220,7 @@ struct nbcon_state {
 static_assert(sizeof(struct nbcon_state) <= sizeof(int));
 
 /**
- * nbcon_prio - console owner priority for nbcon consoles
+ * enum nbcon_prio - console owner priority for nbcon consoles
  * @NBCON_PRIO_NONE:		Unused
  * @NBCON_PRIO_NORMAL:		Normal (non-emergency) usage
  * @NBCON_PRIO_EMERGENCY:	Emergency output (WARN/OOPS...)
@@ -287,7 +287,7 @@ struct nbcon_write_context {
 /**
  * struct console - The console descriptor structure
  * @name:		The name of the console driver
- * @write:		Write callback to output messages (Optional)
+ * @write:		Legacy write callback to output messages (Optional)
  * @read:		Read callback for console input (Optional)
  * @device:		The underlying TTY device driver (Optional)
  * @unblank:		Callback to unblank the console (Optional)
@@ -304,10 +304,6 @@ struct nbcon_write_context {
  * @data:		Driver private data
  * @node:		hlist node for the console list
  *
- * @write_atomic:	Write callback for atomic context
- * @write_thread:	Write callback for non-atomic context
- * @driver_enter:	Callback to begin synchronization with driver code
- * @driver_exit:	Callback to finish synchronization with driver code
  * @nbcon_state:	State for nbcon consoles
  * @nbcon_seq:		Sequence number of the next record for nbcon to print
  * @pbufs:		Pointer to nbcon private buffer
@@ -335,12 +331,110 @@ struct console {
 	struct hlist_node	node;
 
 	/* nbcon console specific members */
-	bool			(*write_atomic)(struct console *con,
-						struct nbcon_write_context *wctxt);
-	bool			(*write_thread)(struct console *con,
-						struct nbcon_write_context *wctxt);
-	void			(*driver_enter)(struct console *con, unsigned long *flags);
-	void			(*driver_exit)(struct console *con, unsigned long flags);
+
+	/**
+	 * @write_atomic:
+	 *
+	 * NBCON callback to write out text in any context. (Optional)
+	 *
+	 * This callback is called with the console already acquired. The
+	 * callback can use nbcon_can_proceed() at any time to verify that
+	 * it is still the owner of the console. In the case that it has
+	 * lost ownership, it is no longer allowed to go forward. In this
+	 * case it must back out immediately and carefully. The buffer
+	 * content is also no longer trusted since it no longer belongs to
+	 * the context.
+	 *
+	 * If the callback needs to perform actions where ownership is not
+	 * allowed to be taken over, nbcon_enter_unsafe() and
+	 * nbcon_exit_unsafe() can be used to mark such sections. These
+	 * functions are also points of possible ownership transfer. If
+	 * either function returns false, ownership has been lost.
+	 *
+	 * If the driver must reacquire ownership in order to finalize or
+	 * revert hardware changes, nbcon_reacquire() can be used. However,
+	 * on reacquire the buffer content is no longer available. A
+	 * reacquire cannot be used to resume printing.
+	 *
+	 * This callback can be called from any context (including NMI).
+	 * Therefore it must avoid usage of any locking and instead rely
+	 * on the console ownership for synchronization.
+	 *
+	 * Returns true if all text was successfully written out and
+	 * ownership was never lost, otherwise false.
+	 */
+	bool (*write_atomic)(struct console *con, struct nbcon_write_context *wctxt);
+
+	/**
+	 * @write_thread:
+	 *
+	 * NBCON callback to write out text in task context. (Optional)
+	 *
+	 * This callback is called with the console already acquired. Any
+	 * additional driver synchronization should have been performed by
+	 * driver_enter().
+	 *
+	 * This callback is always called from task context but with migration
+	 * disabled.
+	 *
+	 * The same criteria for console ownership verification and unsafe
+	 * sections applies as with write_atomic(). The difference between
+	 * this callback and write_atomic() is that this callback is used
+	 * during normal operation and is always called from task context.
+	 * This provides drivers with a relatively relaxed locking context
+	 * for synchronizing output to the hardware.
+	 *
+	 * Returns true if all text was successfully written out, otherwise
+	 * false.
+	 */
+	bool (*write_thread)(struct console *con, struct nbcon_write_context *wctxt);
+
+	/**
+	 * @driver_enter:
+	 *
+	 * NBCON callback to begin synchronization with driver code.
+	 * (Required for NBCON if write_thread is provided)
+	 *
+	 * Console drivers typically must deal with access to the hardware
+	 * via user input/output (such as an interactive login shell) and
+	 * output of kernel messages via printk() calls. This callback is
+	 * called before the kernel begins output via the write_thread()
+	 * callback due to printk() calls. The driver can use this
+	 * callback to acquire some driver lock in order to synchronize
+	 * against user input/output (or any other driver functionality).
+	 *
+	 * This callback is always called from task context. It may use any
+	 * synchronization method required by the driver. BUT this callback
+	 * MUST disable migration. The console driver may be using a
+	 * sychronization mechanism that already takes care of this (such as
+	 * spinlocks). Otherwise this function must explicitly call
+	 * migrate_disable().
+	 *
+	 * The flags argument is provided as a convenience to the driver. It
+	 * will be passed again to driver_exit() when printing is completed
+	 * (for example, if spin_lock_irqsave() was used). It can be ignored
+	 * if the driver does not need it.
+	 */
+	void (*driver_enter)(struct console *con, unsigned long *flags);
+
+	/**
+	 * @driver_exit:
+	 *
+	 * NBCON callback to finish synchronization with driver code.
+	 * (Required for NBCON if write_thread is provided)
+	 *
+	 * This callback is called after the kernel has finished printing a
+	 * printk message. It is the counterpart to driver_enter().
+	 *
+	 * This callback is always called from task context. It must
+	 * appropriately re-enable migration (depending on how driver_enter()
+	 * disabled migration).
+	 *
+	 * The flags argument is the value of the same variable that was
+	 * passed to driver_enter().
+	 */
+	void (*driver_exit)(struct console *con, unsigned long flags);
+
 	atomic_t		__private nbcon_state;
 	atomic_long_t		__private nbcon_seq;
 	struct printk_buffers	*pbufs;

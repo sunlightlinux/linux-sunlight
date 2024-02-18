@@ -197,6 +197,17 @@ static int __init control_devkmsg(char *str)
 }
 __setup("printk.devkmsg=", control_devkmsg);
 
+#if !defined(CONFIG_PREEMPT_RT)
+DEFINE_STATIC_KEY_FALSE(force_printkthreads_key);
+
+static int __init setup_forced_printkthreads(char *arg)
+{
+        static_branch_enable(&force_printkthreads_key);
+        return 0;
+}
+early_param("threadprintk", setup_forced_printkthreads);
+#endif
+
 char devkmsg_log_str[DEVKMSG_STR_MAX_SIZE] = "ratelimit";
 #if defined(CONFIG_PRINTK) && defined(CONFIG_SYSCTL)
 int devkmsg_sysctl_set_loglvl(struct ctl_table *table, int write,
@@ -2350,7 +2361,7 @@ asmlinkage int vprintk_emit(int facility, int level,
 			    const char *fmt, va_list args)
 {
 	bool do_trylock_unlock = printing_via_unlock &&
-				 !IS_ENABLED(CONFIG_PREEMPT_RT);
+				 !force_printkthreads();
 	int printed_len;
 
 	/* Suppress unimportant messages after panic happens */
@@ -2769,7 +2780,7 @@ static int console_cpu_notify(unsigned int cpu)
 		return 0;
 
 	if (!cpuhp_tasks_frozen && printing_via_unlock &&
-	    !IS_ENABLED(CONFIG_PREEMPT_RT)) {
+	    !force_printkthreads()) {
 		/* If trylock fails, someone else is doing the printing */
 		if (console_trylock())
 			console_unlock();
@@ -2831,8 +2842,6 @@ static void __console_unlock(void)
 	console_locked = 0;
 	up_console_sem();
 }
-
-static DEFINE_WAIT_OVERRIDE_MAP(printk_legacy_map, LD_WAIT_SLEEP);
 
 #ifdef CONFIG_PRINTK
 
@@ -2948,6 +2957,33 @@ out:
 }
 
 /*
+ * Legacy console printing from printk() caller context does not respect
+ * raw_spinlock/spinlock nesting. For !PREEMPT_RT the lockdep warning is a
+ * false positive. For PREEMPT_RT the false positive condition does not
+ * occur.
+ *
+ * This map is used to establish LD_WAIT_SLEEP context for the console write
+ * callbacks when legacy printing to avoid false positive lockdep complaints,
+ * thus allowing lockdep to continue to function for real issues.
+ */
+#ifdef CONFIG_PREEMPT_RT
+static inline void printk_legacy_lock_map_acquire_try(void) { }
+static inline void printk_legacy_lock_map_release(void) { }
+#else
+DEFINE_WAIT_OVERRIDE_MAP(printk_legacy_map, LD_WAIT_SLEEP);
+
+static inline void printk_legacy_lock_map_acquire_try(void)
+{
+	lock_map_acquire_try(&printk_legacy_map);
+}
+
+static inline void printk_legacy_lock_map_release(void)
+{
+	lock_map_release(&printk_legacy_map);
+}
+#endif /* CONFIG_PREEMPT_RT */
+
+/*
  * Used as the printk buffers for non-panic, serialized console printing.
  * This is for legacy (!CON_NBCON) as well as all boot (CON_BOOT) consoles.
  * Its usage requires the console_lock held.
@@ -2998,10 +3034,10 @@ static bool console_emit_next_record(struct console *con, bool *handover, int co
 
 	/* Write everything out to the hardware. */
 
-	if (IS_ENABLED(CONFIG_PREEMPT_RT)) {
+	if (force_printkthreads()) {
 		/*
-		 * On PREEMPT_RT this function is either in a thread or
-		 * panic context. So there is no need for concern about
+		 * With forced threading this function is either in a thread
+		 * or panic context. So there is no need for concern about
 		 * printk reentrance, handovers, or lockdep complaints.
 		 */
 
@@ -3024,9 +3060,9 @@ static bool console_emit_next_record(struct console *con, bool *handover, int co
 		/* Do not trace print latency. */
 		stop_critical_timings();
 
-		lock_map_acquire_try(&printk_legacy_map);
+		printk_legacy_lock_map_acquire_try();
 		con->write(con, outbuf, pmsg.outbuf_len);
-		lock_map_release(&printk_legacy_map);
+		printk_legacy_lock_map_release();
 
 		start_critical_timings();
 
@@ -3098,16 +3134,13 @@ static bool console_flush_all(bool do_cond_resched, u64 *next_seq, bool *handove
 			if ((flags & CON_NBCON) && con->kthread)
 				continue;
 
-			if (!console_is_usable(con, flags, true))
+			if (!console_is_usable(con, flags, !do_cond_resched))
 				continue;
 			any_usable = true;
 
 			if (flags & CON_NBCON) {
-
-				lock_map_acquire_try(&printk_legacy_map);
-				progress = nbcon_atomic_emit_next_record(con, handover, cookie);
-				lock_map_release(&printk_legacy_map);
-
+				progress = nbcon_legacy_emit_next_record(con, handover, cookie,
+									 !do_cond_resched);
 				printk_seq = nbcon_seq_read(con);
 			} else {
 				progress = console_emit_next_record(con, handover, cookie);
@@ -3207,10 +3240,10 @@ static void console_flush_and_unlock(void)
 void console_unlock(void)
 {
 	/*
-	 * PREEMPT_RT relies on kthread and atomic consoles for printing.
-	 * It never attempts to print from console_unlock().
+	 * Forced threading relies on kthread and atomic consoles for
+	 * printing. It never attempts to print from console_unlock().
 	 */
-	if (IS_ENABLED(CONFIG_PREEMPT_RT)) {
+	if (force_printkthreads()) {
 		__console_unlock();
 		return;
 	}
@@ -3504,7 +3537,7 @@ void nbcon_legacy_kthread_create(void)
 
 	lockdep_assert_held(&console_mutex);
 
-	if (!IS_ENABLED(CONFIG_PREEMPT_RT))
+	if (!force_printkthreads())
 		return;
 
 	if (!printk_threads_enabled || nbcon_legacy_kthread)
@@ -4102,7 +4135,7 @@ static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progre
 	 * Otherwise this function will just wait for the threaded printers
 	 * to print up to @seq.
 	 */
-	if (printing_via_unlock && !IS_ENABLED(CONFIG_PREEMPT_RT)) {
+	if (printing_via_unlock && !force_printkthreads()) {
 		console_lock();
 		console_unlock();
 	}
@@ -4210,8 +4243,8 @@ static void wake_up_klogd_work_func(struct irq_work *irq_work)
 	int pending = this_cpu_xchg(printk_pending, 0);
 
 	if (pending & PRINTK_PENDING_OUTPUT) {
-		if (IS_ENABLED(CONFIG_PREEMPT_RT)) {
-			wake_up_interruptible(&legacy_wait);
+		if (force_printkthreads()) {
+			wake_up_legacy_kthread();
 		} else {
 			/*
 			 * If trylock fails, some other context
