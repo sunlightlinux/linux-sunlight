@@ -1,0 +1,32 @@
+drm drm-fixes b401b621758e46812da61fa58a67c3fd8d91de0d
+	Linux 6.8-rc5
+drm-misc drm-misc-fixes ed683b9bb91fc274383e222ba5873a9ee9033462
+	sparc: Fix undefined reference to fb_is_primary_device
+drm-intel drm-intel-fixes fb1e881273f432e593f8789f99e725b09304cc97
+	drm/i915/tv: Fix TV mode
+drm-xe drm-xe-fixes 6650d23f3e20ca00482a71a4ef900f0ea776fb15
+	drm/xe: Fix modpost warning on xe_mocs kunit module
+drm drm-next 40d47c5fb4f2a7c1ef168598f01bdcbd31ba4038
+	Merge tag 'amd-drm-next-6.9-2024-02-19' of https://gitlab.freedesktop.org/agd5f/linux into drm-next
+drm-misc drm-misc-next-fixes 1f1626ac0428820f998245478610f452650bcab5
+	drm/ttm: fix ttm pool initialization for no-dma-device drivers
+drm-intel drm-intel-next-fixes 84b5ece64477df4394d362d494a2496bf0878985
+	drm/i915: Drop -Wstringop-overflow
+drm-xe drm-xe-next-fixes bf3ff145df184698a8a80b33265064638572366f
+	drm/xe: display support should not depend on EXPERT
+drm-misc drm-misc-next 583f2bdc8a44695f423c98d0ba565abf4c67e9c6
+	MAINTAINERS: Create entry for Renesas RZ DRM drivers
+drm-intel drm-intel-next bf7626f19d6ff14b9722273e23700400cc4d78ba
+	drm/i915/tv: Fix TV mode
+drm-intel drm-intel-gt-next c77ad63fb6d30d55d86d436c612454b4cbb7e671
+	drm/i915: Check before removing mm notifier
+drm-xe drm-xe-next a24d9099777d9c314c984b94653407710c2358b4
+	drm/xe: Do not include current dir for generated/xe_wa_oob.h
+drm-intel topic/core-for-CI ddccaf79b3af791db0822484c945f44fba5d2365
+	kunit: device: Unregister the kunit_bus on shutdown
+drm topic/nouveau-misc dfc4005f8c172eea359f9db08c3b2b0ff0153699
+	drm/nouveau/disp: move DAC load detection method
+drm topic/drm-ci ad6bfe1b66a5c146ec236847eca7af4c8806d666
+	drm: ci: docs: fix build warning - add missing escape
+drm-xe topic/xe-for-CI 8a5058131ddeaf56b875de67b72680623841cfcc
+	drm/xe/guc: define PVC FW
