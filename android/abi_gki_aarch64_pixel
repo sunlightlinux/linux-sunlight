@@ -164,7 +164,6 @@
   console_suspend_enabled
   __const_udelay
   consume_skb
-  contig_page_data
   _copy_from_iter
   __copy_overflow
   _copy_to_iter
@@ -226,6 +225,7 @@
   debugfs_lookup
   debugfs_remove
   default_llseek
+  deferred_free
   delayed_work_timer_fn
   desc_to_gpio
   destroy_workqueue
@@ -351,7 +351,7 @@
   _dev_notice
   dev_pm_domain_attach_by_name
   dev_pm_domain_detach
-  dev_pm_opp_add
+  dev_pm_opp_add_dynamic
   dev_pm_opp_clear_config
   dev_pm_opp_disable
   dev_pm_opp_find_freq_ceil
@@ -394,6 +394,11 @@
   dma_buf_get
   dma_buf_map_attachment
   dma_buf_mmap
+  dmabuf_page_pool_alloc
+  dmabuf_page_pool_create
+  dmabuf_page_pool_destroy
+  dmabuf_page_pool_free
+  dmabuf_page_pool_get_size
   dma_buf_put
   dma_buf_unmap_attachment
   dma_buf_vmap
@@ -1040,7 +1045,6 @@
   __mmap_lock_do_trace_start_locking
   __mmdrop
   mod_delayed_work_on
-  mod_node_page_state
   mod_timer
   __module_get
   module_layout
@@ -1444,7 +1448,6 @@
   rtnl_unlock
   sched_clock
   sched_setattr_nocheck
-  sched_set_normal
   sched_setscheduler
   sched_setscheduler_nocheck
   sched_show_task
@@ -1599,6 +1602,7 @@
   spi_register_controller
   __spi_register_driver
   spi_setup
+  spi_slave_abort
   spi_sync
   spi_sync_locked
   spi_unregister_controller
