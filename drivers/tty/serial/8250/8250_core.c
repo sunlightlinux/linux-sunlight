@@ -621,14 +621,14 @@ static void univ8250_console_driver_enter(struct console *con, unsigned long *fl
 {
 	struct uart_port *up = &serial8250_ports[con->index].port;
 
-	__uart_port_lock_irqsave(up, flags);
+	uart_port_lock_irqsave(up, flags);
 }
 
 static void univ8250_console_driver_exit(struct console *con, unsigned long flags)
 {
 	struct uart_port *up = &serial8250_ports[con->index].port;
 
-	__uart_port_unlock_irqrestore(up, flags);
+	uart_port_unlock_irqrestore(up, flags);
 }
 #endif /* CONFIG_SERIAL_8250_LEGACY_CONSOLE */
 
