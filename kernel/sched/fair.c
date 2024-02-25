@@ -1435,7 +1435,7 @@ static void __update_curr(struct cfs_rq *cfs_rq, bool tick)
 #else // !CONFIG_SCHED_BORE
 	curr->vruntime += calc_delta_fair(delta_exec, curr);
 #endif // CONFIG_SCHED_BORE
-	update_deadline(cfs_rq, curr);
+	update_deadline(cfs_rq, curr, tick);
 	update_min_vruntime(cfs_rq);
 
 	if (entity_is_task(curr))
