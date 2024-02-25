@@ -588,6 +588,7 @@ void intel_hfi_online(unsigned int cpu)
 	struct hfi_instance *hfi_instance;
 	struct hfi_cpu_info *info;
 	u16 die_id;
+	u64 msr_val;
 
 	/* Nothing to do if hfi_instances are missing. */
 	if (!hfi_instances)
