@@ -293,6 +293,7 @@
   pci_iounmap
   pci_read_config_byte
   pci_read_config_dword
+  pci_read_config_word
   __pci_register_driver
   pci_release_region
   pci_request_region
@@ -450,6 +451,7 @@
   virtio_device_freeze
   virtio_device_restore
   virtio_reset_device
+  virtio_transport_notify_set_rcvlowat
   virtqueue_add_inbuf
   virtqueue_add_outbuf
   virtqueue_add_sgs
@@ -1137,8 +1139,10 @@
   __ClearPageMovable
   init_on_free
   mutex_trylock
+  page_relinquish
   page_reporting_register
   page_reporting_unregister
+  post_page_relinquish_tlb_inv
   register_oom_notifier
   register_shrinker
   __SetPageMovable
@@ -1147,6 +1151,7 @@
   system_freezable_wq
   unregister_oom_notifier
   unregister_shrinker
+  virtqueue_disable_dma_api_for_buffers
   vm_event_states
   vm_node_stat
 

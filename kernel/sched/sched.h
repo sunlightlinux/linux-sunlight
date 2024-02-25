@@ -1032,6 +1032,7 @@ struct rq {
 	u64			clock;
 	/* Ensure that all clocks are in the same cache line */
 	u64			clock_task ____cacheline_aligned;
+	u64			clock_task_mult;
 	u64			clock_pelt;
 	unsigned long		lost_idle_time;
 	u64			clock_pelt_idle;
@@ -2236,6 +2237,8 @@ extern const u32		sched_prio_to_wmult[40];
 #define ENQUEUE_MIGRATED	0x00
 #endif
 #define ENQUEUE_INITIAL		0x80
+
+#define ENQUEUE_WAKEUP_SYNC	0x80
 
 #define RETRY_TASK		((void *)-1UL)
 
