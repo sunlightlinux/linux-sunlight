@@ -140,7 +140,7 @@ int intel_hdcp_read_valid_bksv(struct intel_digital_port *dig_port,
 }
 
 /* Is HDCP1.4 capable on Platform and Sink */
-bool intel_hdcp_capable(struct intel_connector *connector)
+bool intel_hdcp_get_capability(struct intel_connector *connector)
 {
 	struct intel_digital_port *dig_port = intel_attached_dig_port(connector);
 	const struct intel_hdcp_shim *shim = connector->hdcp.shim;
@@ -150,8 +150,8 @@ bool intel_hdcp_capable(struct intel_connector *connector)
 	if (!shim)
 		return capable;
 
-	if (shim->hdcp_capable) {
-		shim->hdcp_capable(dig_port, &capable);
+	if (shim->hdcp_get_capability) {
+		shim->hdcp_get_capability(dig_port, &capable);
 	} else {
 		if (!intel_hdcp_read_valid_bksv(dig_port, shim, bksv))
 			capable = true;
@@ -160,12 +160,14 @@ bool intel_hdcp_capable(struct intel_connector *connector)
 	return capable;
 }
 
-/* Is HDCP2.2 capable on Platform and Sink */
-bool intel_hdcp2_capable(struct intel_connector *connector)
+/*
+ * Check if the source has all the building blocks ready to make
+ * HDCP 2.2 work
+ */
+static bool intel_hdcp2_prerequisite(struct intel_connector *connector)
 {
 	struct drm_i915_private *i915 = to_i915(connector->base.dev);
 	struct intel_hdcp *hdcp = &connector->hdcp;
-	bool capable = false;
 
 	/* I915 support for HDCP2.2 */
 	if (!hdcp->hdcp2_supported)
@@ -185,10 +187,38 @@ bool intel_hdcp2_capable(struct intel_connector *connector)
 	}
 	mutex_unlock(&i915->display.hdcp.hdcp_mutex);
 
+	return true;
+}
+
+/* Is HDCP2.2 capable on Platform and Sink */
+bool intel_hdcp2_get_capability(struct intel_connector *connector)
+{
+	struct intel_hdcp *hdcp = &connector->hdcp;
+	bool capable = false;
+
+	if (!intel_hdcp2_prerequisite(connector))
+		return false;
+
 	/* Sink's capability for HDCP2.2 */
-	hdcp->shim->hdcp_2_2_capable(connector, &capable);
+	hdcp->shim->hdcp_2_2_get_capability(connector, &capable);
 
 	return capable;
+}
+
+void intel_hdcp_get_remote_capability(struct intel_connector *connector,
+				      bool *hdcp_capable,
+				      bool *hdcp2_capable)
+{
+	struct intel_hdcp *hdcp = &connector->hdcp;
+
+	if (!hdcp->shim->get_remote_hdcp_capability)
+		return;
+
+	hdcp->shim->get_remote_hdcp_capability(connector, hdcp_capable,
+					       hdcp2_capable);
+
+	if (!intel_hdcp2_prerequisite(connector))
+		*hdcp2_capable = false;
 }
 
 static bool intel_hdcp_in_use(struct drm_i915_private *i915,
@@ -726,8 +756,8 @@ static int intel_hdcp_auth(struct intel_connector *connector)
 	 * whether the display supports HDCP before we write An. For HDMI
 	 * displays, this is not necessary.
 	 */
-	if (shim->hdcp_capable) {
-		ret = shim->hdcp_capable(dig_port, &hdcp_capable);
+	if (shim->hdcp_get_capability) {
+		ret = shim->hdcp_get_capability(dig_port, &hdcp_capable);
 		if (ret)
 			return ret;
 		if (!hdcp_capable) {
@@ -2374,7 +2404,7 @@ static int _intel_hdcp_enable(struct intel_atomic_state *state,
 	 * Considering that HDCP2.2 is more secure than HDCP1.4, If the setup
 	 * is capable of HDCP2.2, it is preferred to use HDCP2.2.
 	 */
-	if (intel_hdcp2_capable(connector)) {
+	if (intel_hdcp2_get_capability(connector)) {
 		ret = intel_hdcp_set_streams(dig_port, state);
 		if (!ret) {
 			ret = _intel_hdcp2_enable(connector);
@@ -2392,7 +2422,7 @@ static int _intel_hdcp_enable(struct intel_atomic_state *state,
 	 * When HDCP2.2 fails and Content Type is not Type1, HDCP1.4 will
 	 * be attempted.
 	 */
-	if (ret && intel_hdcp_capable(connector) &&
+	if (ret && intel_hdcp_get_capability(connector) &&
 	    hdcp->content_type != DRM_MODE_HDCP_CONTENT_TYPE1) {
 		ret = intel_hdcp1_enable(connector);
 	}
