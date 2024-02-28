@@ -98,8 +98,7 @@ struct drm_dp_vsc_sdp {
 	enum dp_content_type content_type;
 };
 
-void drm_dp_vsc_sdp_log(const char *level, struct device *dev,
-			const struct drm_dp_vsc_sdp *vsc);
+void drm_dp_vsc_sdp_log(struct drm_printer *p, const struct drm_dp_vsc_sdp *vsc);
 
 int drm_dp_psr_setup_time(const u8 psr_cap[EDP_PSR_RECEIVER_CAP_SIZE]);
 
@@ -812,5 +811,6 @@ int drm_dp_bw_overhead(int lane_count, int hactive,
 		       int dsc_slice_count,
 		       int bpp_x16, unsigned long flags);
 int drm_dp_bw_channel_coding_efficiency(bool is_uhbr);
+int drm_dp_max_dprx_data_rate(int max_link_rate, int max_lanes);
 
 #endif /* _DRM_DP_HELPER_H_ */
