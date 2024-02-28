@@ -33,6 +33,7 @@
 #include <linux/string_helpers.h>
 
 #include <drm/display/drm_dp_helper.h>
+#include <drm/display/drm_dp_tunnel.h>
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_atomic_uapi.h>
@@ -73,6 +74,7 @@
 #include "intel_dp.h"
 #include "intel_dp_link_training.h"
 #include "intel_dp_mst.h"
+#include "intel_dp_tunnel.h"
 #include "intel_dpll.h"
 #include "intel_dpll_mgr.h"
 #include "intel_dpt.h"
@@ -2478,7 +2480,7 @@ intel_link_compute_m_n(u16 bits_per_pixel_x16, int nlanes,
 	u32 link_symbol_clock = intel_dp_link_symbol_clock(link_clock);
 	u32 data_m = intel_dp_effective_data_rate(pixel_clock, bits_per_pixel_x16,
 						  bw_overhead);
-	u32 data_n = intel_dp_max_data_rate(link_clock, nlanes);
+	u32 data_n = drm_dp_max_dprx_data_rate(link_clock, nlanes);
 
 	/*
 	 * Windows/BIOS uses fixed M/N values always. Follow suit.
@@ -4490,6 +4492,8 @@ copy_bigjoiner_crtc_state_modeset(struct intel_atomic_state *state,
 	saved_state->crc_enabled = slave_crtc_state->crc_enabled;
 
 	intel_crtc_free_hw_state(slave_crtc_state);
+	if (slave_crtc_state->dp_tunnel_ref.tunnel)
+		drm_dp_tunnel_ref_put(&slave_crtc_state->dp_tunnel_ref);
 	memcpy(slave_crtc_state, saved_state, sizeof(*slave_crtc_state));
 	kfree(saved_state);
 
@@ -4504,6 +4508,10 @@ copy_bigjoiner_crtc_state_modeset(struct intel_atomic_state *state,
 	drm_mode_copy(&slave_crtc_state->hw.adjusted_mode,
 		      &master_crtc_state->hw.adjusted_mode);
 	slave_crtc_state->hw.scaling_filter = master_crtc_state->hw.scaling_filter;
+
+	if (master_crtc_state->dp_tunnel_ref.tunnel)
+		drm_dp_tunnel_ref_get(master_crtc_state->dp_tunnel_ref.tunnel,
+				      &slave_crtc_state->dp_tunnel_ref);
 
 	copy_bigjoiner_crtc_state_nomodeset(state, slave_crtc);
 
@@ -4532,6 +4540,8 @@ intel_crtc_prepare_cleared_state(struct intel_atomic_state *state,
 
 	/* free the old crtc_state->hw members */
 	intel_crtc_free_hw_state(crtc_state);
+
+	intel_dp_tunnel_atomic_clear_stream_bw(state, crtc_state);
 
 	/* FIXME: before the switch to atomic started, a new pipe_config was
 	 * kzalloc'd. Code that depends on any field being zero should be
@@ -5362,6 +5372,10 @@ static int intel_modeset_pipe(struct intel_atomic_state *state,
 
 	ret = drm_atomic_add_affected_connectors(&state->base,
 						 &crtc->base);
+	if (ret)
+		return ret;
+
+	ret = intel_dp_tunnel_atomic_add_state_for_crtc(state, crtc);
 	if (ret)
 		return ret;
 
@@ -6252,12 +6266,11 @@ static int intel_atomic_check_config(struct intel_atomic_state *state,
 
 static int intel_atomic_check_config_and_link(struct intel_atomic_state *state)
 {
-	struct drm_i915_private *i915 = to_i915(state->base.dev);
 	struct intel_link_bw_limits new_limits;
 	struct intel_link_bw_limits old_limits;
 	int ret;
 
-	intel_link_bw_init_limits(i915, &new_limits);
+	intel_link_bw_init_limits(state, &new_limits);
 	old_limits = new_limits;
 
 	while (true) {
@@ -7109,6 +7122,8 @@ static void intel_atomic_commit_tail(struct intel_atomic_state *state)
 	}
 
 	intel_commit_modeset_disables(state);
+
+	intel_dp_tunnel_atomic_alloc_bw(state);
 
 	/* FIXME: Eventually get rid of our crtc->config pointer */
 	for_each_new_intel_crtc_in_state(state, crtc, new_crtc_state, i)
@@ -8086,8 +8101,9 @@ void intel_hpd_poll_fini(struct drm_i915_private *i915)
 	/* Kill all the work that may have been queued by hpd. */
 	drm_connector_list_iter_begin(&i915->drm, &conn_iter);
 	for_each_intel_connector_iter(connector, &conn_iter) {
-		if (connector->modeset_retry_work.func)
-			cancel_work_sync(&connector->modeset_retry_work);
+		if (connector->modeset_retry_work.func &&
+		    cancel_work_sync(&connector->modeset_retry_work))
+			drm_connector_put(&connector->base);
 		if (connector->hdcp.shim) {
 			cancel_delayed_work_sync(&connector->hdcp.check_work);
 			cancel_work_sync(&connector->hdcp.prop_work);
