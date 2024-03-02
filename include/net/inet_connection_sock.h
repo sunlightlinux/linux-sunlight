@@ -17,6 +17,7 @@
 #include <linux/poll.h>
 #include <linux/kernel.h>
 #include <linux/sockptr.h>
+#include <linux/android_kabi.h>
 
 #include <net/inet_sock.h>
 #include <net/request_sock.h>
@@ -52,6 +53,8 @@ struct inet_connection_sock_af_ops {
 				  char __user *optval, int __user *optlen);
 	void	    (*addr2sockaddr)(struct sock *sk, struct sockaddr *);
 	void	    (*mtu_reduced)(struct sock *sk);
+
+	ANDROID_KABI_RESERVE(1);
 };
 
 /** inet_connection_sock - INET connection oriented sock
@@ -135,8 +138,10 @@ struct inet_connection_sock {
 	u32			  icsk_probes_tstamp;
 	u32			  icsk_user_timeout;
 
-#define ICSK_CA_PRIV_SIZE      (144)
-	u64			  icsk_ca_priv[ICSK_CA_PRIV_SIZE / sizeof(u64)];
+	ANDROID_KABI_RESERVE(1);
+
+	u64			  icsk_ca_priv[104 / sizeof(u64)];
+#define ICSK_CA_PRIV_SIZE	  sizeof_field(struct inet_connection_sock, icsk_ca_priv)
 };
 
 #define ICSK_TIME_RETRANS	1	/* Retransmit timer */
