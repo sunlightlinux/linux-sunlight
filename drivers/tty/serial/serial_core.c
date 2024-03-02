@@ -1432,9 +1432,9 @@ static int uart_rs485_config(struct uart_port *port)
 	uart_set_rs485_termination(port, rs485);
 	uart_set_rs485_rx_during_tx(port, rs485);
 
-	spin_lock_irqsave(&port->lock, flags);
+	uart_port_lock_irqsave(port, &flags);
 	ret = port->rs485_config(port, NULL, rs485);
-	spin_unlock_irqrestore(&port->lock, flags);
+	uart_port_unlock_irqrestore(port, flags);
 	if (ret) {
 		memset(rs485, 0, sizeof(*rs485));
 		/* unset GPIOs */
@@ -1490,7 +1490,7 @@ static int uart_set_rs485_config(struct tty_struct *tty, struct uart_port *port,
 		if (!(rs485.flags & SER_RS485_ENABLED))
 			port->ops->set_mctrl(port, port->mctrl);
 	}
-	spin_unlock_irqrestore(&port->lock, flags);
+	uart_port_unlock_irqrestore(port, flags);
 	if (ret) {
 		/* restore old GPIO settings */
 		gpiod_set_value_cansleep(port->rs485_term_gpio,
