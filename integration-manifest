@@ -1,28 +1,28 @@
-drm drm-fixes 72fa02fdf83306c52bc1eede28359e3fa32a151a
-	nouveau: add an ioctl to report vram usage
-drm-misc drm-misc-fixes 00d6a284fcf3fad1b7e1b5bc3cd87cbfb60ce03f
-	fbcon: always restore the old font data in fbcon_do_set_font()
-drm-intel drm-intel-fixes d206a76d7d2726f3b096037f2079ce0bd3ba329b
-	Linux 6.8-rc6
-drm-xe drm-xe-fixes 6650d23f3e20ca00482a71a4ef900f0ea776fb15
-	drm/xe: Fix modpost warning on xe_mocs kunit module
-drm drm-next f112b68f273fb0121cb64e0c3ac06adcb91e32b8
-	Merge v6.8-rc6 into drm-next
-drm-misc drm-misc-next-fixes b0fda2fcb472454474b858a06419249d7eca56db
-	Merge drm/drm-next into drm-misc-next-fixes
+drm drm-fixes f6ecfdad359a01c7fd8a3bcfde3ef0acdf107e6e
+	drm/nouveau: keep DMA buffers required for suspend/resume
+drm-misc drm-misc-fixes c70703320e557ff30847915e6a7631a9abdda16b
+	drm/tests/drm_buddy: add alloc_range_bias test
+drm-intel drm-intel-fixes 01bb1ae35006e473138c90711bad1a6b614a1823
+	drm/i915: Check before removing mm notifier
+drm-xe drm-xe-fixes 8188cae3cc3d8018ec97ca9ab8caa3acc69a056d
+	drm/xe/xe_trace: Add move_lacks_source detail to xe_bo_move trace
+drm drm-next c6d6a82d8a9f8f9326b760accaa532b839b80140
+	Merge tag 'drm-misc-next-fixes-2024-02-29' of https://anongit.freedesktop.org/git/drm/drm-misc into drm-next
+drm-misc drm-misc-next-fixes 9cb3542aeeac31b3dd6b5a7d58b9b7d6fe9fd2bc
+	drm/imx/dcss: fix resource size calculation
 drm-intel drm-intel-next-fixes 84b5ece64477df4394d362d494a2496bf0878985
 	drm/i915: Drop -Wstringop-overflow
 drm-xe drm-xe-next-fixes bf3ff145df184698a8a80b33265064638572366f
 	drm/xe: display support should not depend on EXPERT
-drm-misc drm-misc-next bfa4437fd3938ae2e186e7664b2db65bb8775670
-	drm/mgag200: Add a workaround for low-latency
-drm-intel drm-intel-next 429ccbd1c39baefc6114b482ae98c188f007afcd
-	drm/i915/hdcp: Remove additional timing for reading mst hdcp message
-drm-intel drm-intel-gt-next c77ad63fb6d30d55d86d436c612454b4cbb7e671
-	drm/i915: Check before removing mm notifier
-drm-xe drm-xe-next ba6bbdc6eaef92998ec7f323c9e1211d344d2556
-	drm/xe: get rid of MAX_BINDS
-drm-intel topic/core-for-CI ddccaf79b3af791db0822484c945f44fba5d2365
-	kunit: device: Unregister the kunit_bus on shutdown
+drm-misc drm-misc-next 216c1282dde38ca87ebdf1ccacee5a0682901574
+	drm/amdgpu: use GTT only as fallback for VRAM|GTT
+drm-intel drm-intel-next d10612f8303fab350d82f8b7d5793683af50ee3c
+	drm/i915: Add missing doc for drm_i915_reset_stats
+drm-intel drm-intel-gt-next 3f2f20da79b208d55e2a78fb04cfc7e91201a1d3
+	drm/i915/guc: Use the new gt_to_guc() wrapper
+drm-xe drm-xe-next 67b7950333925db42efaf0616caf4e77decddda1
+	drm/xe/mocs: Fix DG2 kunit
+drm-intel topic/core-for-CI 240b5555409fc55205d50279f585e4e9929cc7be
+	mei: gsc_proxy: match component when GSC is on different bus
 drm-xe topic/xe-for-CI 4f933fae1dc702fb75f63ea54372b93094d8990a
 	drm/xe/guc: define PVC FW

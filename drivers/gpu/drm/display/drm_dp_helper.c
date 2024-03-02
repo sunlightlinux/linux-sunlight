@@ -533,6 +533,15 @@ static int drm_dp_dpcd_access(struct drm_dp_aux *aux, u8 request,
 	mutex_lock(&aux->hw_mutex);
 
 	/*
+	 * If the device attached to the aux bus is powered down then there's
+	 * no reason to attempt a transfer. Error out immediately.
+	 */
+	if (aux->powered_down) {
+		ret = -EBUSY;
+		goto unlock;
+	}
+
+	/*
 	 * The specification doesn't give any recommendation on how often to
 	 * retry native transactions. We used to retry 7 times like for
 	 * aux i2c transactions but real world devices this wasn't
@@ -598,6 +607,29 @@ int drm_dp_dpcd_probe(struct drm_dp_aux *aux, unsigned int offset)
 	return ret < 0 ? ret : 0;
 }
 EXPORT_SYMBOL(drm_dp_dpcd_probe);
+
+/**
+ * drm_dp_dpcd_set_powered() - Set whether the DP device is powered
+ * @aux: DisplayPort AUX channel; for convenience it's OK to pass NULL here
+ *       and the function will be a no-op.
+ * @powered: true if powered; false if not
+ *
+ * If the endpoint device on the DP AUX bus is known to be powered down
+ * then this function can be called to make future transfers fail immediately
+ * instead of needing to time out.
+ *
+ * If this function is never called then a device defaults to being powered.
+ */
+void drm_dp_dpcd_set_powered(struct drm_dp_aux *aux, bool powered)
+{
+	if (!aux)
+		return;
+
+	mutex_lock(&aux->hw_mutex);
+	aux->powered_down = !powered;
+	mutex_unlock(&aux->hw_mutex);
+}
+EXPORT_SYMBOL(drm_dp_dpcd_set_powered);
 
 /**
  * drm_dp_dpcd_read() - read a series of bytes from the DPCD
@@ -1857,6 +1889,9 @@ static int drm_dp_i2c_xfer(struct i2c_adapter *adapter, struct i2c_msg *msgs,
 	unsigned transfer_size;
 	struct drm_dp_aux_msg msg;
 	int err = 0;
+
+	if (aux->powered_down)
+		return -EBUSY;
 
 	dp_aux_i2c_transfer_size = clamp(dp_aux_i2c_transfer_size, 1, DP_AUX_MAX_PAYLOAD_BYTES);
 
@@ -4152,3 +4187,33 @@ int drm_dp_bw_channel_coding_efficiency(bool is_uhbr)
 		return 800000;
 }
 EXPORT_SYMBOL(drm_dp_bw_channel_coding_efficiency);
+
+/**
+ * drm_dp_max_dprx_data_rate - Get the max data bandwidth of a DPRX sink
+ * @max_link_rate: max DPRX link rate in 10kbps units
+ * @max_lanes: max DPRX lane count
+ *
+ * Given a link rate and lanes, get the data bandwidth.
+ *
+ * Data bandwidth is the actual payload rate, which depends on the data
+ * bandwidth efficiency and the link rate.
+ *
+ * Note that protocol layers above the DPRX link level considered here can
+ * further limit the maximum data rate. Such layers are the MST topology (with
+ * limits on the link between the source and first branch device as well as on
+ * the whole MST path until the DPRX link) and (Thunderbolt) DP tunnels -
+ * which in turn can encapsulate an MST link with its own limit - with each
+ * SST or MST encapsulated tunnel sharing the BW of a tunnel group.
+ *
+ * Returns the maximum data rate in kBps units.
+ */
+int drm_dp_max_dprx_data_rate(int max_link_rate, int max_lanes)
+{
+	int ch_coding_efficiency =
+		drm_dp_bw_channel_coding_efficiency(drm_dp_is_uhbr_rate(max_link_rate));
+
+	return DIV_ROUND_DOWN_ULL(mul_u32_u32(max_link_rate * 10 * max_lanes,
+					      ch_coding_efficiency),
+				  1000000 * 8);
+}
+EXPORT_SYMBOL(drm_dp_max_dprx_data_rate);
