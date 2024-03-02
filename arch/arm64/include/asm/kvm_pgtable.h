@@ -281,7 +281,7 @@ enum kvm_pgtable_prot {
 
 #define KVM_HOST_S2_DEFAULT_MMIO_PTE		\
 	(KVM_HOST_S2_DEFAULT_MEM_PTE |		\
-	KVM_PTE_LEAF_ATTR_HI_S2_XN)
+	FIELD_PREP(KVM_PTE_LEAF_ATTR_HI_S2_XN, KVM_PTE_LEAF_ATTR_HI_S2_XN_XN))
 
 #define PAGE_HYP		KVM_PGTABLE_PROT_RW
 #define PAGE_HYP_EXEC		(KVM_PGTABLE_PROT_R | KVM_PGTABLE_PROT_X)
@@ -773,6 +773,28 @@ bool kvm_pgtable_stage2_test_clear_young(struct kvm_pgtable *pgt, u64 addr,
  */
 int kvm_pgtable_stage2_relax_perms(struct kvm_pgtable *pgt, u64 addr,
 				   enum kvm_pgtable_prot prot);
+
+/**
+ * __kvm_pgtable_stage2_relax_perms() - Relax the permissions enforced by a
+ *				        page-table entry.
+ * @pgt:	Page-table structure initialised by kvm_pgtable_stage2_init*().
+ * @addr:	Intermediate physical address to identify the page-table entry.
+ * @prot:	Additional permissions to grant for the mapping.
+ * @flags:	Flags for the page-table walker
+ *
+ * The offset of @addr within a page is ignored.
+ *
+ * If there is a valid, leaf page-table entry used to translate @addr, then
+ * relax the permissions in that entry according to the read, write and
+ * execute permissions specified by @prot. No permissions are removed, and
+ * TLB invalidation is performed after updating the entry. Software bits cannot
+ * be set or cleared using kvm_pgtable_stage2_relax_perms().
+ *
+ * Return: 0 on success, negative error code on failure.
+ */
+int __kvm_pgtable_stage2_relax_perms(struct kvm_pgtable *pgt, u64 addr,
+				     enum kvm_pgtable_prot prot,
+				     enum kvm_pgtable_walk_flags flags);
 
 /**
  * kvm_pgtable_stage2_flush_range() - Clean and invalidate data cache to Point

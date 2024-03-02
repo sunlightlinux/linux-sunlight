@@ -85,6 +85,7 @@ void kvm_arm_vcpu_destroy(struct kvm_vcpu *vcpu);
 struct kvm_hyp_memcache {
 	phys_addr_t head;
 	unsigned long nr_pages;
+	unsigned long flags;
 };
 
 static inline void push_hyp_memcache(struct kvm_hyp_memcache *mc,
@@ -137,11 +138,21 @@ static inline void __free_hyp_memcache(struct kvm_hyp_memcache *mc,
 }
 
 #define HYP_MEMCACHE_ACCOUNT_KMEMCG BIT(1)
+#define HYP_MEMCACHE_ACCOUNT_STAGE2 BIT(2)
 
-void free_hyp_memcache(struct kvm_hyp_memcache *mc,
-		       unsigned long flags);
-int topup_hyp_memcache(struct kvm_hyp_memcache *mc, unsigned long min_pages,
-		       unsigned long flags);
+void free_hyp_memcache(struct kvm_hyp_memcache *mc);
+int topup_hyp_memcache(struct kvm_hyp_memcache *mc, unsigned long min_pages);
+
+static inline void init_hyp_memcache(struct kvm_hyp_memcache *mc)
+{
+	memset(mc, 0, sizeof(*mc));
+}
+
+static inline void init_hyp_stage2_memcache(struct kvm_hyp_memcache *mc)
+{
+	init_hyp_memcache(mc);
+	mc->flags = HYP_MEMCACHE_ACCOUNT_KMEMCG | HYP_MEMCACHE_ACCOUNT_STAGE2;
+}
 
 struct kvm_vmid {
 	atomic64_t id;
@@ -210,7 +221,7 @@ typedef unsigned int pkvm_handle_t;
 
 struct kvm_protected_vm {
 	pkvm_handle_t handle;
-	struct kvm_hyp_memcache teardown_mc;
+	struct kvm_hyp_memcache stage2_teardown_mc;
 	struct rb_root pinned_pages;
 	gpa_t pvmfw_load_addr;
 	bool enabled;
@@ -480,6 +491,48 @@ struct vcpu_reset_state {
 	bool		reset;
 };
 
+struct kvm_hyp_req {
+#define KVM_HYP_LAST_REQ	0
+#define KVM_HYP_REQ_TYPE_MEM	1
+#define KVM_HYP_REQ_TYPE_MAP	2
+	u8 type;
+	union {
+		struct {
+#define REQ_MEM_DEST_HYP_ALLOC		1
+#define REQ_MEM_DEST_VCPU_MEMCACHE	2
+#define REQ_MEM_DEST_HYP_IOMMU		3
+			u8	dest;
+			int	nr_pages;
+			int	sz_alloc; /* Size of the page. */
+		} mem;
+		struct {
+			unsigned long	guest_ipa;
+			size_t		size;
+		} map;
+	};
+};
+
+#define KVM_HYP_REQ_MAX (PAGE_SIZE / sizeof(struct kvm_hyp_req))
+/*
+ * De-serialize request from SMCCC return.
+ * See hyp-main.c for serialization.
+ */
+/* Register a2. */
+#define	SMCCC_REQ_TYPE_MASK		GENMASK_ULL(7, 0)
+#define SMCCC_REQ_DEST_MASK		GENMASK_ULL(15 , 8)
+/* Register a3. */
+#define SMCCC_REQ_NR_PAGES_MASK		GENMASK_ULL(31 , 0)
+#define SMCCC_REQ_SZ_ALLOC_MASK		GENMASK_ULL(63 , 32)
+
+static inline void hyp_reqs_smccc_decode(struct arm_smccc_res *res,
+					 struct kvm_hyp_req *req)
+{
+	req->type = FIELD_GET(SMCCC_REQ_TYPE_MASK, res->a2);
+	req->mem.dest = FIELD_GET(SMCCC_REQ_DEST_MASK, res->a2);
+	req->mem.nr_pages = FIELD_GET(SMCCC_REQ_NR_PAGES_MASK, res->a3);
+	req->mem.sz_alloc = FIELD_GET(SMCCC_REQ_SZ_ALLOC_MASK, res->a3);
+}
+
 struct kvm_vcpu_arch {
 	struct kvm_cpu_context ctxt;
 
@@ -590,7 +643,7 @@ struct kvm_vcpu_arch {
 		/* Cache some mmu pages needed inside spinlock regions */
 		struct kvm_mmu_memory_cache mmu_page_cache;
 		/* Pages to be donated to pkvm/EL2 if it runs out */
-		struct kvm_hyp_memcache pkvm_memcache;
+		struct kvm_hyp_memcache stage2_mc;
 	};
 
 	/* feature flags */
@@ -610,6 +663,9 @@ struct kvm_vcpu_arch {
 
 	/* Per-vcpu CCSIDR override or NULL */
 	u32 *ccsidr;
+
+	/* PAGE_SIZE bound list of requests from the hypervisor to the host. */
+	struct kvm_hyp_req *hyp_reqs;
 };
 
 /*
@@ -954,6 +1010,8 @@ static inline bool __vcpu_write_sys_reg_to_cpu(u64 val, int reg)
 
 struct kvm_vm_stat {
 	struct kvm_vm_stat_generic generic;
+	atomic64_t protected_hyp_mem;
+	atomic64_t protected_shared_mem;
 };
 
 struct kvm_vcpu_stat {

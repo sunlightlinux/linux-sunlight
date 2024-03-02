@@ -22,12 +22,14 @@
 #define ARM_EXCEPTION_IL	  3
 /* The hyp-stub will return this for any kvm_call_hyp() call */
 #define ARM_EXCEPTION_HYP_GONE	  HVC_STUB_ERR
+#define ARM_EXCEPTION_HYP_REQ	  5
 
 #define kvm_arm_exception_type					\
 	{ARM_EXCEPTION_IRQ,		"IRQ"		},	\
 	{ARM_EXCEPTION_EL1_SERROR, 	"SERROR"	},	\
 	{ARM_EXCEPTION_TRAP, 		"TRAP"		},	\
-	{ARM_EXCEPTION_HYP_GONE,	"HYP_GONE"	}
+	{ARM_EXCEPTION_HYP_GONE,	"HYP_GONE"	},	\
+	{ARM_EXCEPTION_HYP_REQ,		"HYP_REQ"	}
 
 /*
  * Size of the HYP vectors preamble. kvm_patch_vector_branch() generates code
@@ -76,6 +78,10 @@ enum __kvm_host_smccc_func {
 	__KVM_HOST_SMCCC_FUNC___pkvm_host_share_hyp,
 	__KVM_HOST_SMCCC_FUNC___pkvm_host_unshare_hyp,
 	__KVM_HOST_SMCCC_FUNC___pkvm_host_map_guest,
+	__KVM_HOST_SMCCC_FUNC___pkvm_host_unmap_guest,
+	__KVM_HOST_SMCCC_FUNC___pkvm_relax_perms,
+	__KVM_HOST_SMCCC_FUNC___pkvm_wrprotect,
+	__KVM_HOST_SMCCC_FUNC___pkvm_tlb_flush_vmid,
 	__KVM_HOST_SMCCC_FUNC___kvm_adjust_pc,
 	__KVM_HOST_SMCCC_FUNC___kvm_vcpu_run,
 	__KVM_HOST_SMCCC_FUNC___kvm_timer_set_cntvoff,
@@ -149,6 +155,19 @@ extern void *__nvhe_undefined_symbol;
 #define CHOOSE_VHE_SYM(sym)		__nvhe_undefined_symbol
 #define this_cpu_ptr_hyp_sym(sym)	(&__nvhe_undefined_symbol)
 #define per_cpu_ptr_hyp_sym(sym, cpu)	(&__nvhe_undefined_symbol)
+
+/*
+ * pKVM uses the module_ops struct to expose services to modules but
+ * doesn't allow fine-grained definition of the license for each export,
+ * and doesn't have a way to check the license of the loaded module.
+ * Given that said module may be proprietary, let's seek GPL compliance
+ * by preventing the accidental export of GPL symbols to hyp modules via
+ * pKVM's module_ops struct.
+ */
+#ifdef EXPORT_SYMBOL_GPL
+#undef EXPORT_SYMBOL_GPL
+#endif
+#define EXPORT_SYMBOL_GPL(sym) BUILD_BUG()
 
 #elif defined(__KVM_VHE_HYPERVISOR__)
 
