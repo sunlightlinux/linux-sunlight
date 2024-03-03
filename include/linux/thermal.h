@@ -15,7 +15,6 @@
 #include <linux/device.h>
 #include <linux/sysfs.h>
 #include <linux/workqueue.h>
-#include <linux/android_kabi.h>
 #include <uapi/linux/thermal.h>
 
 /* invalid cooling state */
@@ -85,8 +84,6 @@ struct thermal_zone_device_ops {
 			  const struct thermal_trip *, enum thermal_trend *);
 	void (*hot)(struct thermal_zone_device *);
 	void (*critical)(struct thermal_zone_device *);
-
-	ANDROID_KABI_RESERVE(1);
 };
 
 struct thermal_cooling_device_ops {
@@ -96,8 +93,6 @@ struct thermal_cooling_device_ops {
 	int (*get_requested_power)(struct thermal_cooling_device *, u32 *);
 	int (*state2power)(struct thermal_cooling_device *, unsigned long, u32 *);
 	int (*power2state)(struct thermal_cooling_device *, u32, unsigned long *);
-
-	ANDROID_KABI_RESERVE(1);
 };
 
 struct thermal_cooling_device {
@@ -113,8 +108,6 @@ struct thermal_cooling_device {
 	struct mutex lock; /* protect thermal_instances list */
 	struct list_head thermal_instances;
 	struct list_head node;
-
-	ANDROID_KABI_RESERVE(1);
 };
 
 /**
@@ -192,8 +185,6 @@ struct thermal_zone_device {
 	struct delayed_work poll_queue;
 	enum thermal_notify_event notify_event;
 	bool suspended;
-
-	ANDROID_KABI_RESERVE(1);
 };
 
 /**
@@ -214,8 +205,6 @@ struct thermal_governor {
 	void (*unbind_from_tz)(struct thermal_zone_device *tz);
 	int (*throttle)(struct thermal_zone_device *tz, int trip);
 	struct list_head	governor_list;
-
-	ANDROID_KABI_RESERVE(1);
 };
 
 /* Structure to define Thermal Zone parameters */
@@ -266,8 +255,6 @@ struct thermal_zone_params {
 	 * 		Used by thermal zone drivers (default 0).
 	 */
 	int offset;
-
-	ANDROID_KABI_RESERVE(1);
 };
 
 /* Function declarations */

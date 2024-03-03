@@ -83,22 +83,12 @@ pkvm_hyp_vcpu_to_hyp_vm(struct pkvm_hyp_vcpu *hyp_vcpu)
 	return container_of(hyp_vcpu->vcpu.kvm, struct pkvm_hyp_vm, kvm);
 }
 
-static inline bool kvm_is_protected(struct kvm *kvm)
+static inline bool vcpu_is_protected(struct kvm_vcpu *vcpu)
 {
 	if (!is_protected_kvm_enabled())
 		return false;
 
-	return kvm->arch.pkvm.enabled;
-}
-
-static inline bool vcpu_is_protected(struct kvm_vcpu *vcpu)
-{
-	return kvm_is_protected(vcpu->kvm);
-}
-
-static inline bool pkvm_hyp_vm_is_protected(struct pkvm_hyp_vm *hyp_vm)
-{
-	return kvm_is_protected(&hyp_vm->kvm);
+	return vcpu->kvm->arch.pkvm.enabled;
 }
 
 static inline bool pkvm_hyp_vcpu_is_protected(struct pkvm_hyp_vcpu *hyp_vcpu)
@@ -111,9 +101,6 @@ extern phys_addr_t pvmfw_size;
 
 void pkvm_hyp_vm_table_init(void *tbl);
 
-struct kvm_hyp_req *
-pkvm_hyp_req_reserve(struct pkvm_hyp_vcpu *hyp_vcpu, u8 type);
-
 int __pkvm_init_vm(struct kvm *host_kvm, unsigned long pgd_hva);
 int __pkvm_init_vcpu(pkvm_handle_t handle, struct kvm_vcpu *host_vcpu);
 int __pkvm_start_teardown_vm(pkvm_handle_t handle);
@@ -124,9 +111,6 @@ struct pkvm_hyp_vcpu *pkvm_load_hyp_vcpu(pkvm_handle_t handle,
 					 unsigned int vcpu_idx);
 void pkvm_put_hyp_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu);
 struct pkvm_hyp_vcpu *pkvm_get_loaded_hyp_vcpu(void);
-
-struct pkvm_hyp_vm *pkvm_get_hyp_vm(pkvm_handle_t handle);
-void pkvm_put_hyp_vm(struct pkvm_hyp_vm *hyp_vm);
 
 u64 pvm_read_id_reg(const struct kvm_vcpu *vcpu, u32 id);
 bool kvm_handle_pvm_sysreg(struct kvm_vcpu *vcpu, u64 *exit_code);

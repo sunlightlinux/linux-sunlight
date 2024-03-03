@@ -16,7 +16,6 @@
 #include <linux/rwsem.h>
 #include <linux/atomic.h>
 #include <linux/hashtable.h>
-#include <linux/android_kabi.h>
 #include <net/gen_stats.h>
 #include <net/rtnetlink.h>
 #include <net/flow_offload.h>
@@ -127,9 +126,6 @@ struct Qdisc {
 
 	struct rcu_head		rcu;
 	netdevice_tracker	dev_tracker;
-
-	ANDROID_KABI_RESERVE(1);
-
 	/* private data */
 	long privdata[] ____cacheline_aligned;
 };
@@ -281,8 +277,6 @@ struct Qdisc_class_ops {
 					struct sk_buff *skb, struct tcmsg*);
 	int			(*dump_stats)(struct Qdisc *, unsigned long,
 					struct gnet_dump *);
-
-	ANDROID_KABI_RESERVE(1);
 };
 
 /* Qdisc_class_ops flag values */
@@ -328,8 +322,6 @@ struct Qdisc_ops {
 	u32			(*egress_block_get)(struct Qdisc *sch);
 
 	struct module		*owner;
-
-	ANDROID_KABI_RESERVE(1);
 };
 
 

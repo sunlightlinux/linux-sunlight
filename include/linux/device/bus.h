@@ -17,7 +17,6 @@
 #include <linux/kobject.h>
 #include <linux/klist.h>
 #include <linux/pm.h>
-#include <linux/android_kabi.h>
 
 struct device_driver;
 struct fwnode_handle;
@@ -108,11 +107,6 @@ struct bus_type {
 	const struct iommu_ops *iommu_ops;
 
 	bool need_parent_lock;
-
-	ANDROID_KABI_RESERVE(1);
-	ANDROID_KABI_RESERVE(2);
-	ANDROID_KABI_RESERVE(3);
-	ANDROID_KABI_RESERVE(4);
 };
 
 int __must_check bus_register(const struct bus_type *bus);

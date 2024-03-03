@@ -32,33 +32,6 @@
 
 DEFINE_PER_CPU(struct kvm_nvhe_init_params, kvm_init_params);
 
-/*
- * Holds one request only, in theory we can compress more, but
- * typically HVC returns on first failure.
- */
-DEFINE_PER_CPU(struct kvm_hyp_req, host_hyp_reqs);
-
-/* Serialize request in SMCCC return context. */
-static inline void hyp_reqs_smccc_encode(unsigned long ret, struct kvm_cpu_context *host_ctxt,
-					 struct kvm_hyp_req *req)
-{
-	cpu_reg(host_ctxt, 1) = ret;
-	cpu_reg(host_ctxt, 2) = 0;
-	cpu_reg(host_ctxt, 3) = 0;
-
-	if (req->type == KVM_HYP_REQ_TYPE_MEM) {
-		cpu_reg(host_ctxt, 2) = FIELD_PREP(SMCCC_REQ_TYPE_MASK, req->type) |
-					FIELD_PREP(SMCCC_REQ_DEST_MASK, req->mem.dest);
-
-		cpu_reg(host_ctxt, 3) = FIELD_PREP(SMCCC_REQ_NR_PAGES_MASK, req->mem.nr_pages) |
-					FIELD_PREP(SMCCC_REQ_SZ_ALLOC_MASK, req->mem.sz_alloc);
-	}
-
-	/* We can't encode others */
-	WARN_ON((req->type != KVM_HYP_REQ_TYPE_MEM) && ((req->type != KVM_HYP_LAST_REQ)));
-	req->type = KVM_HYP_LAST_REQ;
-}
-
 void __kvm_hyp_host_forward_smc(struct kvm_cpu_context *host_ctxt);
 
 static bool (*default_host_smc_handler)(struct user_pt_regs *regs);
@@ -143,11 +116,12 @@ void __hyp_exit(void)
 
 static int pkvm_refill_memcache(struct pkvm_hyp_vcpu *hyp_vcpu)
 {
+	struct pkvm_hyp_vm *hyp_vm = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
+	u64 nr_pages = VTCR_EL2_LVLS(hyp_vm->kvm.arch.vtcr) - 1;
 	struct kvm_vcpu *host_vcpu = hyp_vcpu->host_vcpu;
 
-	return refill_memcache(&hyp_vcpu->vcpu.arch.stage2_mc,
-			       host_vcpu->arch.stage2_mc.nr_pages,
-			       &host_vcpu->arch.stage2_mc);
+	return refill_memcache(&hyp_vcpu->vcpu.arch.pkvm_memcache, nr_pages,
+			       &host_vcpu->arch.pkvm_memcache);
 }
 
 typedef void (*hyp_entry_exit_handler_fn)(struct pkvm_hyp_vcpu *);
@@ -202,6 +176,9 @@ static void handle_pvm_entry_hvc64(struct pkvm_hyp_vcpu *hyp_vcpu)
 	u32 fn = smccc_get_function(&hyp_vcpu->vcpu);
 
 	switch (fn) {
+	case ARM_SMCCC_VENDOR_HYP_KVM_MMIO_GUARD_MAP_FUNC_ID:
+		pkvm_refill_memcache(hyp_vcpu);
+		break;
 	case ARM_SMCCC_VENDOR_HYP_KVM_MEM_SHARE_FUNC_ID:
 		fallthrough;
 	case ARM_SMCCC_VENDOR_HYP_KVM_MEM_UNSHARE_FUNC_ID:
@@ -378,6 +355,10 @@ static void handle_pvm_exit_hvc64(struct pkvm_hyp_vcpu *hyp_vcpu)
 		fallthrough;
 	case ARM_SMCCC_VENDOR_HYP_KVM_MEM_RELINQUISH_FUNC_ID:
 		n = 4;
+		break;
+
+	case ARM_SMCCC_VENDOR_HYP_KVM_MMIO_GUARD_MAP_FUNC_ID:
+		n = 3;
 		break;
 
 	case PSCI_1_1_FN_SYSTEM_RESET2:
@@ -651,16 +632,6 @@ static void sync_debug_state(struct pkvm_hyp_vcpu *hyp_vcpu)
 	vcpu->arch.debug_ptr = &host_vcpu->arch.vcpu_debug_state;
 }
 
-static void __flush_hyp_reqs(struct pkvm_hyp_vcpu *hyp_vcpu)
-{
-	struct kvm_hyp_req *hyp_req = hyp_vcpu->vcpu.arch.hyp_reqs;
-
-	hyp_req->type = KVM_HYP_LAST_REQ;
-
-	/* One of the request might have been TYPE_MEM/DEST_VCPU_MEMCACHE */
-	pkvm_refill_memcache(hyp_vcpu);
-}
-
 static void flush_hyp_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu)
 {
 	struct kvm_vcpu *host_vcpu = hyp_vcpu->host_vcpu;
@@ -707,9 +678,6 @@ static void flush_hyp_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu)
 		if (ec_handler)
 			ec_handler(hyp_vcpu);
 		break;
-	case ARM_EXCEPTION_HYP_REQ:
-		__flush_hyp_reqs(hyp_vcpu);
-		break;
 	default:
 		BUG();
 	}
@@ -735,7 +703,6 @@ static void sync_hyp_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu, u32 exit_reason)
 
 	switch (ARM_EXCEPTION_CODE(exit_reason)) {
 	case ARM_EXCEPTION_IRQ:
-	case ARM_EXCEPTION_HYP_REQ:
 		break;
 	case ARM_EXCEPTION_TRAP:
 		esr_ec = ESR_ELx_EC(kvm_vcpu_get_esr(&hyp_vcpu->vcpu));
@@ -985,7 +952,6 @@ static void handle___pkvm_host_map_guest(struct kvm_cpu_context *host_ctxt)
 {
 	DECLARE_REG(u64, pfn, host_ctxt, 1);
 	DECLARE_REG(u64, gfn, host_ctxt, 2);
-	DECLARE_REG(enum kvm_pgtable_prot, prot, host_ctxt, 3);
 	struct pkvm_hyp_vcpu *hyp_vcpu;
 	int ret = -EINVAL;
 
@@ -1004,71 +970,9 @@ static void handle___pkvm_host_map_guest(struct kvm_cpu_context *host_ctxt)
 	if (pkvm_hyp_vcpu_is_protected(hyp_vcpu))
 		ret = __pkvm_host_donate_guest(pfn, gfn, hyp_vcpu);
 	else
-		ret = __pkvm_host_share_guest(pfn, gfn, hyp_vcpu, prot);
+		ret = __pkvm_host_share_guest(pfn, gfn, hyp_vcpu);
 out:
 	cpu_reg(host_ctxt, 1) =  ret;
-}
-
-static void handle___pkvm_host_unmap_guest(struct kvm_cpu_context *host_ctxt)
-{
-	DECLARE_REG(pkvm_handle_t, handle, host_ctxt, 1);
-	DECLARE_REG(u64, pfn, host_ctxt, 2);
-	DECLARE_REG(u64, gfn, host_ctxt, 3);
-	struct pkvm_hyp_vm *vm;
-	int ret = -EINVAL;
-
-	if (!is_protected_kvm_enabled())
-		goto out;
-
-	vm = pkvm_get_hyp_vm(handle);
-	if (!vm)
-		goto out;
-
-	ret = __pkvm_host_unshare_guest(pfn, gfn, vm);
-	pkvm_put_hyp_vm(vm);
-out:
-	cpu_reg(host_ctxt, 1) =  ret;
-}
-
-static void handle___pkvm_relax_perms(struct kvm_cpu_context *host_ctxt)
-{
-	DECLARE_REG(u64, pfn, host_ctxt, 1);
-	DECLARE_REG(u64, gfn, host_ctxt, 2);
-	DECLARE_REG(enum kvm_pgtable_prot, prot, host_ctxt, 3);
-	struct pkvm_hyp_vcpu *hyp_vcpu;
-	int ret = -EINVAL;
-
-	if (!is_protected_kvm_enabled())
-		goto out;
-
-	hyp_vcpu = pkvm_get_loaded_hyp_vcpu();
-	if (!hyp_vcpu)
-		goto out;
-
-	ret = __pkvm_relax_perms(pfn, gfn, prot, hyp_vcpu);
-out:
-	cpu_reg(host_ctxt, 1) = ret;
-}
-
-static void handle___pkvm_wrprotect(struct kvm_cpu_context *host_ctxt)
-{
-	DECLARE_REG(pkvm_handle_t, handle, host_ctxt, 1);
-	DECLARE_REG(u64, pfn, host_ctxt, 2);
-	DECLARE_REG(u64, gfn, host_ctxt, 3);
-	struct pkvm_hyp_vm *vm;
-	int ret = -EINVAL;
-
-	if (!is_protected_kvm_enabled())
-		goto out;
-
-	vm = pkvm_get_hyp_vm(handle);
-	if (!vm)
-		goto out;
-
-	ret = __pkvm_wrprotect(vm, pfn, gfn);
-	pkvm_put_hyp_vm(vm);
-out:
-	cpu_reg(host_ctxt, 1) = ret;
 }
 
 static void handle___kvm_adjust_pc(struct kvm_cpu_context *host_ctxt)
@@ -1129,24 +1033,6 @@ static void handle___kvm_tlb_flush_vmid(struct kvm_cpu_context *host_ctxt)
 	DECLARE_REG(struct kvm_s2_mmu *, mmu, host_ctxt, 1);
 
 	__kvm_tlb_flush_vmid(kern_hyp_va(mmu));
-}
-
-static void handle___pkvm_tlb_flush_vmid(struct kvm_cpu_context *host_ctxt)
-{
-	DECLARE_REG(pkvm_handle_t, handle, host_ctxt, 1);
-	struct pkvm_hyp_vm *vm;
-
-	if (!is_protected_kvm_enabled())
-		return;
-
-	vm = pkvm_get_hyp_vm(handle);
-	if (!vm)
-		return;
-
-	if (!pkvm_hyp_vm_is_protected(vm))
-		__kvm_tlb_flush_vmid(&vm->kvm.arch.mmu);
-
-	pkvm_put_hyp_vm(vm);
 }
 
 static void handle___kvm_flush_cpu_context(struct kvm_cpu_context *host_ctxt)
@@ -1493,10 +1379,6 @@ static const hcall_t host_hcall[] = {
 	HANDLE_FUNC(__pkvm_host_share_hyp),
 	HANDLE_FUNC(__pkvm_host_unshare_hyp),
 	HANDLE_FUNC(__pkvm_host_map_guest),
-	HANDLE_FUNC(__pkvm_host_unmap_guest),
-	HANDLE_FUNC(__pkvm_relax_perms),
-	HANDLE_FUNC(__pkvm_wrprotect),
-	HANDLE_FUNC(__pkvm_tlb_flush_vmid),
 	HANDLE_FUNC(__kvm_adjust_pc),
 	HANDLE_FUNC(__kvm_vcpu_run),
 	HANDLE_FUNC(__kvm_timer_set_cntvoff),

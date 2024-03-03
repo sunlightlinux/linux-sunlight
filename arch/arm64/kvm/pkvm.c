@@ -15,17 +15,12 @@
 #include <linux/of_fdt.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/sort.h>
-#include <linux/stat.h>
 
-#include <asm/kvm_host.h>
 #include <asm/kvm_hyp.h>
 #include <asm/kvm_mmu.h>
 #include <asm/kvm_pkvm.h>
 #include <asm/kvm_pkvm_module.h>
 #include <asm/setup.h>
-
-#include <uapi/linux/mount.h>
-#include <linux/init_syscalls.h>
 
 #include "hyp_constants.h"
 
@@ -244,9 +239,6 @@ static int __pkvm_create_hyp_vm(struct kvm *host_kvm)
 	pgd = alloc_pages_exact(pgd_sz, GFP_KERNEL_ACCOUNT);
 	if (!pgd)
 		return -ENOMEM;
-	atomic64_add(pgd_sz, &host_kvm->stat.protected_hyp_mem);
-
-	init_hyp_stage2_memcache(&host_kvm->arch.pkvm.stage2_teardown_mc);
 
 	/* Donate the VM memory to hyp and let hyp initialize it. */
 	ret = kvm_call_refill_hyp_nvhe(__pkvm_init_vm, host_kvm, pgd);
@@ -265,8 +257,6 @@ static int __pkvm_create_hyp_vm(struct kvm *host_kvm)
 		__pkvm_vcpu_hyp_created(host_vcpu);
 	}
 
-	kvm_account_pgtable_pages(pgd, pgd_sz >> PAGE_SHIFT);
-
 	return 0;
 
 destroy_vm:
@@ -274,8 +264,6 @@ destroy_vm:
 	return ret;
 free_pgd:
 	free_pages_exact(pgd, pgd_sz);
-	atomic64_sub(pgd_sz, &host_kvm->stat.protected_hyp_mem);
-
 	return ret;
 }
 
@@ -300,6 +288,8 @@ void pkvm_destroy_hyp_vm(struct kvm *host_kvm)
 
 int pkvm_init_host_vm(struct kvm *host_kvm, unsigned long type)
 {
+	mutex_init(&host_kvm->lock);
+
 	if (!(type & KVM_VM_TYPE_ARM_PROTECTED))
 		return 0;
 
@@ -391,7 +381,7 @@ void pkvm_host_reclaim_page(struct kvm *host_kvm, phys_addr_t ipa)
 
 	ppage = container_of(node, struct kvm_pinned_page, node);
 	account_locked_vm(mm, 1, false);
-	unpin_user_pages_dirty_lock(&ppage->page, 1, host_kvm->arch.pkvm.enabled);
+	unpin_user_pages_dirty_lock(&ppage->page, 1, true);
 	kfree(ppage);
 }
 
@@ -603,11 +593,7 @@ int __init pkvm_load_early_modules(void)
 {
 	char *token, *buf = early_pkvm_modules;
 	char *module_path = CONFIG_PKVM_MODULE_PATH;
-	int err = init_mount("proc", "/proc", "proc",
-			     MS_SILENT | MS_NOEXEC | MS_NOSUID, NULL);
-
-	if (err)
-		return err;
+	int err;
 
 	while (true) {
 		token = strsep(&buf, ",");
@@ -802,18 +788,19 @@ EXPORT_SYMBOL(__pkvm_register_el2_call);
 
 int __pkvm_topup_hyp_alloc(unsigned long nr_pages)
 {
-	struct kvm_hyp_memcache mc;
+	struct kvm_hyp_memcache mc = {
+		.head		= 0,
+		.nr_pages	= 0,
+	};
 	int ret;
 
-	init_hyp_memcache(&mc);
-
-	ret = topup_hyp_memcache(&mc, nr_pages);
+	ret = topup_hyp_memcache(&mc, nr_pages, 0);
 	if (ret)
 		return ret;
 
 	ret = kvm_call_hyp_nvhe(__pkvm_hyp_alloc_refill, mc.head, mc.nr_pages);
 	if (ret)
-		free_hyp_memcache(&mc);
+		free_hyp_memcache(&mc, 0);
 
 	return ret;
 }
@@ -824,8 +811,6 @@ unsigned long __pkvm_reclaim_hyp_alloc(unsigned long nr_pages)
 	unsigned long ratelimit, last_reclaim, reclaimed = 0;
 	struct kvm_hyp_memcache mc;
 	struct arm_smccc_res res;
-
-	init_hyp_memcache(&mc);
 
 	do {
 		/* Arbitrary upper bound to limit the time spent at EL2 */
@@ -839,7 +824,7 @@ unsigned long __pkvm_reclaim_hyp_alloc(unsigned long nr_pages)
 		mc.head = res.a1;
 		last_reclaim = mc.nr_pages = res.a2;
 
-		free_hyp_memcache(&mc);
+		free_hyp_memcache(&mc, 0);
 		reclaimed += last_reclaim;
 
 	} while (last_reclaim && (reclaimed < nr_pages));

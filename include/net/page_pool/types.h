@@ -5,7 +5,6 @@
 
 #include <linux/dma-direction.h>
 #include <linux/ptr_ring.h>
-#include <linux/android_kabi.h>
 
 #define PP_FLAG_DMA_MAP		BIT(0) /* Should page_pool do the DMA
 					* map/unmap
@@ -181,8 +180,6 @@ struct page_pool {
 	refcount_t user_cnt;
 
 	u64 destroy_cnt;
-
-	ANDROID_KABI_RESERVE(1);
 };
 
 struct page *page_pool_alloc_pages(struct page_pool *pool, gfp_t gfp);
