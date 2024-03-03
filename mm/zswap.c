@@ -1100,8 +1100,6 @@ static int zswap_writeback_entry(struct zswap_entry *entry,
 	if (zswap_rb_search(&tree->rbroot, swp_offset(entry->swpentry)) != entry) {
 		spin_unlock(&tree->lock);
 		delete_from_swap_cache(page_folio(page));
-		unlock_page(page);
-		put_page(page);
 		ret = -ENOMEM;
 		goto fail;
 	}
@@ -1217,7 +1215,7 @@ bool zswap_store(struct folio *folio)
 	if (folio_test_large(folio))
 		return false;
 
-	if (!tree)
+	if (!zswap_enabled || !tree)
 		return false;
 
 	/*
@@ -1232,9 +1230,6 @@ bool zswap_store(struct folio *folio)
 		zswap_invalidate_entry(tree, dupentry);
 	}
 	spin_unlock(&tree->lock);
-
-	if (!zswap_enabled)
-		return false;
 
 	/*
 	 * XXX: zswap reclaim does not work with cgroups yet. Without a
