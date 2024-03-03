@@ -20,8 +20,8 @@ drm-intel drm-intel-next d10612f8303fab350d82f8b7d5793683af50ee3c
 	drm/i915: Add missing doc for drm_i915_reset_stats
 drm-intel drm-intel-gt-next 3f2f20da79b208d55e2a78fb04cfc7e91201a1d3
 	drm/i915/guc: Use the new gt_to_guc() wrapper
-drm-xe drm-xe-next 67b7950333925db42efaf0616caf4e77decddda1
-	drm/xe/mocs: Fix DG2 kunit
+drm-xe drm-xe-next be3939be12c3bdf83ca724aba936197cf1c13c61
+	replace 'grouped target' in Makefile with pattern rule
 drm-intel topic/core-for-CI 240b5555409fc55205d50279f585e4e9929cc7be
 	mei: gsc_proxy: match component when GSC is on different bus
 drm-xe topic/xe-for-CI 4f933fae1dc702fb75f63ea54372b93094d8990a
