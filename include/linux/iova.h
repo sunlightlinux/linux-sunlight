@@ -13,7 +13,6 @@
 #include <linux/kernel.h>
 #include <linux/rbtree.h>
 #include <linux/dma-mapping.h>
-#include <linux/android_vendor.h>
 
 /* iova structure */
 struct iova {
@@ -39,8 +38,6 @@ struct iova_domain {
 
 	struct iova_rcache	*rcaches;
 	struct hlist_node	cpuhp_dead;
-
-	ANDROID_VENDOR_DATA(1);
 };
 
 static inline unsigned long iova_size(struct iova *iova)

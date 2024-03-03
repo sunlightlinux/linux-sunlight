@@ -14,7 +14,6 @@
 #include <linux/dm-ioctl.h>
 #include <linux/math64.h>
 #include <linux/ratelimit.h>
-#include <linux/android_kabi.h>
 
 struct dm_dev;
 struct dm_target;
@@ -211,9 +210,6 @@ struct target_type {
 	dm_dax_zero_page_range_fn dax_zero_page_range;
 	dm_dax_recovery_write_fn dax_recovery_write;
 
-	ANDROID_KABI_RESERVE(1);
-	ANDROID_KABI_RESERVE(2);
-
 	/* For internal device-mapper use. */
 	struct list_head list;
 };
@@ -400,9 +396,6 @@ struct dm_target {
 	 * bio_set_dev(). NOTE: ideally a target should _not_ need this.
 	 */
 	bool needs_bio_set_dev:1;
-
-	ANDROID_KABI_RESERVE(1);
-	ANDROID_KABI_RESERVE(2);
 };
 
 void *dm_per_bio_data(struct bio *bio, size_t data_size);
