@@ -1,27 +1,27 @@
-drm drm-fixes f6ecfdad359a01c7fd8a3bcfde3ef0acdf107e6e
-	drm/nouveau: keep DMA buffers required for suspend/resume
-drm-misc drm-misc-fixes c70703320e557ff30847915e6a7631a9abdda16b
-	drm/tests/drm_buddy: add alloc_range_bias test
-drm-intel drm-intel-fixes 01bb1ae35006e473138c90711bad1a6b614a1823
-	drm/i915: Check before removing mm notifier
+drm drm-fixes d6a209dd76e5ceb5d536e0a1a707ffcf64f95cef
+	Merge tag 'drm-intel-fixes-2024-03-01' of https://anongit.freedesktop.org/git/drm/drm-intel into drm-fixes
+drm-misc drm-misc-fixes 95bf25bb9ed5dedb7fb39f76489f7d6843ab0475
+	drm/udl: Add ARGB8888 as a format
+drm-intel drm-intel-fixes 0b385be4c3ccd5636441923d7cad5eda6b4651cb
+	drm/i915: Don't explode when the dig port we don't have an AUX CH
 drm-xe drm-xe-fixes 8188cae3cc3d8018ec97ca9ab8caa3acc69a056d
 	drm/xe/xe_trace: Add move_lacks_source detail to xe_bo_move trace
 drm drm-next c6d6a82d8a9f8f9326b760accaa532b839b80140
 	Merge tag 'drm-misc-next-fixes-2024-02-29' of https://anongit.freedesktop.org/git/drm/drm-misc into drm-next
-drm-misc drm-misc-next-fixes 9cb3542aeeac31b3dd6b5a7d58b9b7d6fe9fd2bc
-	drm/imx/dcss: fix resource size calculation
+drm-misc drm-misc-next-fixes 4a0e7b3c37531aabddf6f144b83ae9b65ec809fd
+	drm/i915: fix applying placement flag
 drm-intel drm-intel-next-fixes 84b5ece64477df4394d362d494a2496bf0878985
 	drm/i915: Drop -Wstringop-overflow
-drm-xe drm-xe-next-fixes bf3ff145df184698a8a80b33265064638572366f
-	drm/xe: display support should not depend on EXPERT
-drm-misc drm-misc-next 216c1282dde38ca87ebdf1ccacee5a0682901574
-	drm/amdgpu: use GTT only as fallback for VRAM|GTT
-drm-intel drm-intel-next d10612f8303fab350d82f8b7d5793683af50ee3c
-	drm/i915: Add missing doc for drm_i915_reset_stats
-drm-intel drm-intel-gt-next 3f2f20da79b208d55e2a78fb04cfc7e91201a1d3
-	drm/i915/guc: Use the new gt_to_guc() wrapper
-drm-xe drm-xe-next be3939be12c3bdf83ca724aba936197cf1c13c61
-	replace 'grouped target' in Makefile with pattern rule
+drm-xe drm-xe-next-fixes e62d2e00780b4a465c77d2229837495fcbc480d3
+	drm/xe: Replace 'grouped target' in Makefile with pattern rule
+drm-misc drm-misc-next f89632a9e5fa6c4787c14458cd42a9ef42025434
+	drm: Add CONFIG_DRM_WERROR
+drm-intel drm-intel-next a62e145981500996ea76af3d740ce0c0d74c5be0
+	drm/i915/dp: Fix connector DSC HW state readout
+drm-intel drm-intel-gt-next 4ae86a7f8dea764adda6b78d208fffe4ba9f14c0
+	drm/i915/guc: Simplify/extend platform check for Wa_14018913170
+drm-xe drm-xe-next 27ee413bbc0b04146f4ee1c7444422bf18dafd47
+	drm/xe: Do not grab forcewakes when issuing GGTT TLB invalidation via GuC
 drm-intel topic/core-for-CI 240b5555409fc55205d50279f585e4e9929cc7be
 	mei: gsc_proxy: match component when GSC is on different bus
 drm-xe topic/xe-for-CI 4f933fae1dc702fb75f63ea54372b93094d8990a
