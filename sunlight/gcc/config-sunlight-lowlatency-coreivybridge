@@ -1,6 +1,6 @@
 #
 # Automatically generated file; DO NOT EDIT.
-# Linux/x86_64 6.8.0-rc6 Kernel Configuration
+# Linux/x86_64 6.8.0-rc7 Kernel Configuration
 #
 CONFIG_CC_VERSION_TEXT="gcc (Debian 13.2.0-13) 13.2.0"
 CONFIG_CC_IS_GCC=y
@@ -7651,6 +7651,7 @@ CONFIG_DRM_HYPERV=m
 CONFIG_DRM_PANEL_ORIENTATION_QUIRKS=y
 # CONFIG_DRM_LIB_RANDOM is not set
 CONFIG_DRM_PRIVACY_SCREEN=y
+# CONFIG_DRM_WERROR is not set
 
 #
 # Frame buffer Devices
