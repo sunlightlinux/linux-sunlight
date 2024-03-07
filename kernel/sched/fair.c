@@ -22,6 +22,9 @@
  *
  *  Remove energy efficiency functions by Alexandre Frade
  *  (C) 2021 Alexandre Frade <kernel@xanmod.org>
+ *
+ *  Burst-Oriented Response Enhancer (BORE) CPU Scheduler
+ *  Copyright (C) 2021-2024 Masahito Suzuki <firelzrd@gmail.com>
  */
 #include <linux/energy_model.h>
 #include <linux/mmap_lock.h>
@@ -67,19 +70,128 @@
  *   SCHED_TUNABLESCALING_LOG - scaled logarithmical, *1+ilog(ncpus)
  *   SCHED_TUNABLESCALING_LINEAR - scaled linear, *ncpus
  *
- * (default SCHED_TUNABLESCALING_LOG = *(1+ilog(ncpus))
+ * (BORE  default SCHED_TUNABLESCALING_NONE = *1 constant)
+ * (EEVDF default SCHED_TUNABLESCALING_LOG  = *(1+ilog(ncpus))
  */
+#ifdef CONFIG_SCHED_BORE
+unsigned int sysctl_sched_tunable_scaling = SCHED_TUNABLESCALING_NONE;
+#else // !CONFIG_SCHED_BORE
 unsigned int sysctl_sched_tunable_scaling = SCHED_TUNABLESCALING_LOG;
+#endif // CONFIG_SCHED_BORE
 
 /*
  * Minimal preemption granularity for CPU-bound tasks:
  *
- * (default: 0.75 msec * (1 + ilog(ncpus)), units: nanoseconds)
+ * (BORE  default: max(1 sec / HZ, min_base_slice) constant, units: nanoseconds)
+ * (EEVDF default: 0.75 msec * (1 + ilog(ncpus)), units: nanoseconds)
  */
+#ifdef CONFIG_SCHED_BORE
+unsigned int            sysctl_sched_base_slice = 1000000000ULL / HZ;
+static unsigned int configured_sched_base_slice = 1000000000ULL / HZ;
+unsigned int        sysctl_sched_min_base_slice =    2000000ULL;
+#else // !CONFIG_SCHED_BORE
 unsigned int sysctl_sched_base_slice			= 750000ULL;
 static unsigned int normalized_sysctl_sched_base_slice	= 750000ULL;
+#endif // CONFIG_SCHED_BORE
 
 const_debug unsigned int sysctl_sched_migration_cost	= 500000UL;
+
+#ifdef CONFIG_SCHED_BORE
+u8   __read_mostly sched_bore                   = 1;
+u8   __read_mostly sched_burst_score_rounding   = 0;
+u8   __read_mostly sched_burst_smoothness_long  = 1;
+u8   __read_mostly sched_burst_smoothness_short = 0;
+u8   __read_mostly sched_burst_fork_atavistic   = 2;
+u8   __read_mostly sched_burst_penalty_offset   = 22;
+uint __read_mostly sched_burst_penalty_scale    = 1280;
+uint __read_mostly sched_burst_cache_lifetime   = 60000000;
+u8   __read_mostly sched_vlag_deviation_limit   = 11;
+static int __maybe_unused thirty_two     = 32;
+static int __maybe_unused sixty_four     = 64;
+static int __maybe_unused maxval_12_bits = 4095;
+
+#define MAX_BURST_PENALTY (39U <<2)
+
+static inline u32 log2plus1_u64_u32f8(u64 v) {
+	u32 msb = fls64(v);
+	s32 excess_bits = msb - 9;
+    u8 fractional = (0 <= excess_bits)? v >> excess_bits: v << -excess_bits;
+	return msb << 8 | fractional;
+}
+
+static inline u32 calc_burst_penalty(u64 burst_time) {
+	u32 greed, tolerance, penalty, scaled_penalty;
+	
+	greed = log2plus1_u64_u32f8(burst_time);
+	tolerance = sched_burst_penalty_offset << 8;
+	penalty = max(0, (s32)greed - (s32)tolerance);
+	scaled_penalty = penalty * sched_burst_penalty_scale >> 16;
+
+	return min(MAX_BURST_PENALTY, scaled_penalty);
+}
+
+static inline u64 scale_slice(u64 delta, struct sched_entity *se) {
+	return mul_u64_u32_shr(delta, sched_prio_to_wmult[se->burst_score], 22);
+}
+
+static inline u64 __unscale_slice(u64 delta, u8 score) {
+	return mul_u64_u32_shr(delta, sched_prio_to_weight[score], 10);
+}
+
+static inline u64 unscale_slice(u64 delta, struct sched_entity *se) {
+	return __unscale_slice(delta, se->burst_score);
+}
+
+static void avg_vruntime_add(struct cfs_rq *cfs_rq, struct sched_entity *se);
+static void avg_vruntime_sub(struct cfs_rq *cfs_rq, struct sched_entity *se);
+
+static void update_burst_score(struct sched_entity *se) {
+	struct cfs_rq *cfs_rq = cfs_rq_of(se);
+	u8 prev_score = se->burst_score;
+	u32 penalty = se->burst_penalty;
+	if (sched_burst_score_rounding) penalty += 0x2U;
+	se->burst_score = penalty >> 2;
+
+	if ((se->burst_score != prev_score) && se->on_cfs_rq) {
+		avg_vruntime_sub(cfs_rq, se);
+		avg_vruntime_add(cfs_rq, se);
+	}
+}
+
+static void update_burst_penalty(struct sched_entity *se) {
+	se->curr_burst_penalty = calc_burst_penalty(se->burst_time);
+	se->burst_penalty = max(se->prev_burst_penalty, se->curr_burst_penalty);
+	update_burst_score(se);
+}
+
+static inline u32 binary_smooth(u32 new, u32 old) {
+  int increment = new - old;
+  return (0 <= increment)?
+    old + ( increment >> (int)sched_burst_smoothness_long):
+    old - (-increment >> (int)sched_burst_smoothness_short);
+}
+
+static void restart_burst(struct sched_entity *se) {
+	se->burst_penalty = se->prev_burst_penalty =
+		binary_smooth(se->curr_burst_penalty, se->prev_burst_penalty);
+	se->curr_burst_penalty = 0;
+	se->burst_time = 0;
+	update_burst_score(se);
+}
+
+static void restart_burst_rescale_deadline(struct sched_entity *se) {
+	s64 vscaled, wremain, vremain = se->deadline - se->vruntime;
+	u8 prev_score = se->burst_score;
+	restart_burst(se);
+	if (prev_score > se->burst_score) {
+		wremain = __unscale_slice(abs(vremain), prev_score);
+		vscaled = scale_slice(wremain, se);
+		if (unlikely(vremain < 0))
+			vscaled = -vscaled;
+		se->deadline = se->vruntime + vscaled;
+	}
+}
+#endif // CONFIG_SCHED_BORE
 
 int sched_thermal_decay_shift;
 static int __init setup_sched_thermal_decay_shift(char *str)
@@ -140,6 +252,87 @@ static unsigned int sysctl_numa_balancing_promote_rate_limit = 65536;
 
 #ifdef CONFIG_SYSCTL
 static struct ctl_table sched_fair_sysctls[] = {
+#ifdef CONFIG_SCHED_BORE
+	{
+		.procname	= "sched_bore",
+		.data		= &sched_bore,
+		.maxlen		= sizeof(u8),
+		.mode		= 0644,
+		.proc_handler = proc_dou8vec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_ONE,
+	},
+	{
+		.procname	= "sched_burst_score_rounding",
+		.data		= &sched_burst_score_rounding,
+		.maxlen		= sizeof(u8),
+		.mode		= 0644,
+		.proc_handler = proc_dou8vec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_ONE,
+	},
+	{
+		.procname	= "sched_burst_smoothness_long",
+		.data		= &sched_burst_smoothness_long,
+		.maxlen		= sizeof(u8),
+		.mode		= 0644,
+		.proc_handler = proc_dou8vec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_ONE,
+	},
+	{
+		.procname	= "sched_burst_smoothness_short",
+		.data		= &sched_burst_smoothness_short,
+		.maxlen		= sizeof(u8),
+		.mode		= 0644,
+		.proc_handler = proc_dou8vec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_ONE,
+	},
+	{
+		.procname	= "sched_burst_fork_atavistic",
+		.data		= &sched_burst_fork_atavistic,
+		.maxlen		= sizeof(u8),
+		.mode		= 0644,
+		.proc_handler = proc_dou8vec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_THREE,
+	},
+	{
+		.procname	= "sched_burst_penalty_offset",
+		.data		= &sched_burst_penalty_offset,
+		.maxlen		= sizeof(u8),
+		.mode		= 0644,
+		.proc_handler = proc_dou8vec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= &sixty_four,
+	},
+	{
+		.procname	= "sched_burst_penalty_scale",
+		.data		= &sched_burst_penalty_scale,
+		.maxlen		= sizeof(uint),
+		.mode		= 0644,
+		.proc_handler = proc_douintvec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= &maxval_12_bits,
+	},
+	{
+		.procname	= "sched_burst_cache_lifetime",
+		.data		= &sched_burst_cache_lifetime,
+		.maxlen		= sizeof(uint),
+		.mode		= 0644,
+		.proc_handler = proc_douintvec,
+	},
+	{
+		.procname	= "sched_vlag_deviation_limit",
+		.data		= &sched_vlag_deviation_limit,
+		.maxlen		= sizeof(u8),
+		.mode		= 0644,
+		.proc_handler = proc_dou8vec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= &thirty_two,
+	},
+#endif // CONFIG_SCHED_BORE
 #ifdef CONFIG_CFS_BANDWIDTH
 	{
 		.procname       = "sched_cfs_bandwidth_slice_us",
@@ -198,6 +391,13 @@ static inline void update_load_set(struct load_weight *lw, unsigned long w)
  *
  * This idea comes from the SD scheduler of Con Kolivas:
  */
+#ifdef CONFIG_SCHED_BORE
+static void update_sysctl(void) {
+	sysctl_sched_base_slice =
+		max(sysctl_sched_min_base_slice, configured_sched_base_slice);
+}
+void sched_update_min_base_slice(void) { update_sysctl(); }
+#else // !CONFIG_SCHED_BORE
 static unsigned int get_update_sysctl_factor(void)
 {
 	unsigned int cpus = min_t(unsigned int, num_online_cpus(), 8);
@@ -228,6 +428,7 @@ static void update_sysctl(void)
 	SET_SYSCTL(sched_base_slice);
 #undef SET_SYSCTL
 }
+#endif // CONFIG_SCHED_BORE
 
 void __init sched_init_granularity(void)
 {
@@ -301,6 +502,9 @@ static inline u64 calc_delta_fair(u64 delta, struct sched_entity *se)
 	if (unlikely(se->load.weight != NICE_0_LOAD))
 		delta = __calc_delta(delta, NICE_0_LOAD, &se->load);
 
+#ifdef CONFIG_SCHED_BORE
+	if (likely(sched_bore)) delta = scale_slice(delta, se);
+#endif // CONFIG_SCHED_BORE
 	return delta;
 }
 
@@ -627,10 +831,26 @@ static inline s64 entity_key(struct cfs_rq *cfs_rq, struct sched_entity *se)
  *
  * As measured, the max (key * weight) value was ~44 bits for a kernel build.
  */
+#if !defined(CONFIG_SCHED_BORE)
+#define entity_weight(se) scale_load_down(se->load.weight)
+#else // CONFIG_SCHED_BORE
+static unsigned long entity_weight(struct sched_entity *se) {
+	unsigned long weight = se->load.weight;
+	if (likely(sched_bore)) weight = unscale_slice(weight, se);
+#ifdef CONFIG_64BIT
+	weight >>= SCHED_FIXEDPOINT_SHIFT - 3;
+#endif // CONFIG_64BIT
+	return weight;
+}
+#endif // CONFIG_SCHED_BORE
+
 static void
 avg_vruntime_add(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
-	unsigned long weight = scale_load_down(se->load.weight);
+	unsigned long weight = entity_weight(se);
+#ifdef CONFIG_SCHED_BORE
+	se->burst_load = weight;
+#endif // CONFIG_SCHED_BORE
 	s64 key = entity_key(cfs_rq, se);
 
 	cfs_rq->avg_vruntime += key * weight;
@@ -640,7 +860,12 @@ avg_vruntime_add(struct cfs_rq *cfs_rq, struct sched_entity *se)
 static void
 avg_vruntime_sub(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
-	unsigned long weight = scale_load_down(se->load.weight);
+#if !defined(CONFIG_SCHED_BORE)
+	unsigned long weight = entity_weight(se);
+#else // CONFIG_SCHED_BORE
+	unsigned long weight = se->burst_load;
+	se->burst_load = 0;
+#endif // CONFIG_SCHED_BORE
 	s64 key = entity_key(cfs_rq, se);
 
 	cfs_rq->avg_vruntime -= key * weight;
@@ -660,14 +885,14 @@ void avg_vruntime_update(struct cfs_rq *cfs_rq, s64 delta)
  * Specifically: avg_runtime() + 0 must result in entity_eligible() := true
  * For this to be so, the result of this function must have a left bias.
  */
-u64 avg_vruntime(struct cfs_rq *cfs_rq)
+static u64 avg_key(struct cfs_rq *cfs_rq)
 {
 	struct sched_entity *curr = cfs_rq->curr;
 	s64 avg = cfs_rq->avg_vruntime;
 	long load = cfs_rq->avg_load;
 
 	if (curr && curr->on_rq) {
-		unsigned long weight = scale_load_down(curr->load.weight);
+		unsigned long weight = entity_weight(curr);
 
 		avg += entity_key(cfs_rq, curr) * weight;
 		load += weight;
@@ -677,12 +902,15 @@ u64 avg_vruntime(struct cfs_rq *cfs_rq)
 		/* sign flips effective floor / ceil */
 		if (avg < 0)
 			avg -= (load - 1);
-		avg = div_s64(avg, load);
+		avg = div64_s64(avg, load);
 	}
 
-	return cfs_rq->min_vruntime + avg;
+	return avg;
 }
 
+u64 avg_vruntime(struct cfs_rq *cfs_rq) {
+	return cfs_rq->min_vruntime + avg_key(cfs_rq);
+}
 /*
  * lag_i = S - s_i = w_i * (V - v_i)
  *
@@ -707,6 +935,9 @@ static void update_entity_lag(struct cfs_rq *cfs_rq, struct sched_entity *se)
 	lag = avg_vruntime(cfs_rq) - se->vruntime;
 
 	limit = calc_delta_fair(max_t(u64, 2*se->slice, TICK_NSEC), se);
+#ifdef CONFIG_SCHED_BORE
+	if (likely(sched_bore)) limit >>= 1;
+#endif // CONFIG_SCHED_BORE
 	se->vlag = clamp(lag, -limit, limit);
 }
 
@@ -734,7 +965,7 @@ static int vruntime_eligible(struct cfs_rq *cfs_rq, u64 vruntime)
 	long load = cfs_rq->avg_load;
 
 	if (curr && curr->on_rq) {
-		unsigned long weight = scale_load_down(curr->load.weight);
+		unsigned long weight = entity_weight(curr);
 
 		avg += entity_key(cfs_rq, curr) * weight;
 		load += weight;
@@ -830,10 +1061,16 @@ static void __enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 	se->min_vruntime = se->vruntime;
 	rb_add_augmented_cached(&se->run_node, &cfs_rq->tasks_timeline,
 				__entity_less, &min_vruntime_cb);
+#ifdef CONFIG_SCHED_BORE
+	se->on_cfs_rq = true;
+#endif // CONFIG_SCHED_BORE
 }
 
 static void __dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
+#ifdef CONFIG_SCHED_BORE
+	se->on_cfs_rq = false;
+#endif // CONFIG_SCHED_BORE
 	rb_erase_augmented_cached(&se->run_node, &cfs_rq->tasks_timeline,
 				  &min_vruntime_cb);
 	avg_vruntime_sub(cfs_rq, se);
@@ -958,6 +1195,7 @@ struct sched_entity *__pick_last_entity(struct cfs_rq *cfs_rq)
  * Scheduling class statistics methods:
  */
 #ifdef CONFIG_SMP
+#if !defined(CONFIG_SCHED_BORE)
 int sched_update_scaling(void)
 {
 	unsigned int factor = get_update_sysctl_factor();
@@ -969,6 +1207,7 @@ int sched_update_scaling(void)
 
 	return 0;
 }
+#endif // CONFIG_SCHED_BORE
 #endif
 #endif
 
@@ -1168,7 +1407,13 @@ static void update_curr(struct cfs_rq *cfs_rq)
 	if (unlikely(delta_exec <= 0))
 		return;
 
+#ifdef CONFIG_SCHED_BORE
+	curr->burst_time += delta_exec;
+	update_burst_penalty(curr);
+	curr->vruntime += max(1ULL, calc_delta_fair(delta_exec, curr));
+#else // !CONFIG_SCHED_BORE
 	curr->vruntime += calc_delta_fair(delta_exec, curr);
+#endif // CONFIG_SCHED_BORE
 	update_deadline(cfs_rq, curr);
 	update_min_vruntime(cfs_rq);
 
@@ -5160,8 +5405,8 @@ static inline void update_misfit_status(struct task_struct *p, struct rq *rq) {}
 static void
 place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 {
-	u64 vslice, vruntime = avg_vruntime(cfs_rq);
-	s64 lag = 0;
+	s64 lag = 0, key = avg_key(cfs_rq);
+	u64 vslice, vruntime = cfs_rq->min_vruntime + key;
 
 	se->slice = sysctl_sched_base_slice;
 	vslice = calc_delta_fair(se->slice, se);
@@ -5174,6 +5419,9 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 	 *
 	 * EEVDF: placement strategy #1 / #2
 	 */
+#ifdef CONFIG_SCHED_BORE
+	if (unlikely(!sched_bore) || se->vlag)
+#endif // CONFIG_SCHED_BORE
 	if (sched_feat(PLACE_LAG) && cfs_rq->nr_running) {
 		struct sched_entity *curr = cfs_rq->curr;
 		unsigned long load;
@@ -5234,12 +5482,22 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 		 */
 		load = cfs_rq->avg_load;
 		if (curr && curr->on_rq)
-			load += scale_load_down(curr->load.weight);
+			load += entity_weight(curr);
 
-		lag *= load + scale_load_down(se->load.weight);
+		lag *= load + entity_weight(se);
+#if !defined(CONFIG_SCHED_BORE)
 		if (WARN_ON_ONCE(!load))
+#else // CONFIG_SCHED_BORE
+		if (unlikely(!load))
+#endif // CONFIG_SCHED_BORE
 			load = 1;
-		lag = div_s64(lag, load);
+		lag = div64_s64(lag, load);
+#ifdef CONFIG_SCHED_BORE
+		if (likely(sched_bore)) {
+			s64 limit = vslice << sched_vlag_deviation_limit;
+			lag = clamp(lag, -limit, limit);
+		}
+#endif // CONFIG_SCHED_BORE
 	}
 
 	se->vruntime = vruntime - lag;
@@ -6806,6 +7064,14 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 	bool was_sched_idle = sched_idle_rq(rq);
 
 	util_est_dequeue(&rq->cfs, p);
+#ifdef CONFIG_SCHED_BORE
+	if (task_sleep) {
+		cfs_rq = cfs_rq_of(se);
+		if (cfs_rq->curr == se)
+			update_curr(cfs_rq);
+		restart_burst(se);
+	}
+#endif // CONFIG_SCHED_BORE
 
 	for_each_sched_entity(se) {
 		cfs_rq = cfs_rq_of(se);
@@ -8298,16 +8564,25 @@ static void yield_task_fair(struct rq *rq)
 	/*
 	 * Are we the only task in the tree?
 	 */
+#if !defined(CONFIG_SCHED_BORE)
 	if (unlikely(rq->nr_running == 1))
 		return;
 
 	clear_buddies(cfs_rq, se);
+#endif // CONFIG_SCHED_BORE
 
 	update_rq_clock(rq);
 	/*
 	 * Update run-time statistics of the 'current'.
 	 */
 	update_curr(cfs_rq);
+#ifdef CONFIG_SCHED_BORE
+	restart_burst_rescale_deadline(se);
+	if (unlikely(rq->nr_running == 1))
+		return;
+
+	clear_buddies(cfs_rq, se);
+#endif // CONFIG_SCHED_BORE
 	/*
 	 * Tell update_rq_clock() that we've just updated,
 	 * so we don't do microscopic update in schedule()
@@ -12397,6 +12672,9 @@ static void task_fork_fair(struct task_struct *p)
 	curr = cfs_rq->curr;
 	if (curr)
 		update_curr(cfs_rq);
+#ifdef CONFIG_SCHED_BORE
+	update_burst_score(se);
+#endif // CONFIG_SCHED_BORE
 	place_entity(cfs_rq, se, ENQUEUE_INITIAL);
 	rq_unlock(rq, &rf);
 }
