@@ -1693,6 +1693,18 @@ config SIEMENS_SIMATIC_IPC_WDT
 	  To compile this driver as a module, choose M here: the module will be
 	  called simatic-ipc-wdt.
 
+config AAEON_IWMI_WDT
+	tristate "AAEON Watchdog Timer"
+	depends on ASUS_WMI
+	select MFD_AAEON
+	help
+	  This is the driver for the hardware watchdog on Single Board
+	  Computers produced by AAEON. Say `Y' here to support its built-in
+	  watchdog timer feature.
+
+	  This driver leverages the ASUS WMI interface to access device
+	  resources.
+
 # M68K Architecture
 
 config M54xx_WATCHDOG
