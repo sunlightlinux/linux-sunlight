@@ -160,13 +160,18 @@ static u32 mt7921_rmw(struct mt76_dev *mdev, u32 offset, u32 mask, u32 val)
 
 static int mt7921_dma_init(struct mt792x_dev *dev)
 {
-	int ret;
+	int i, ret;
 
 	mt76_dma_attach(&dev->mt76);
 
-	ret = mt792x_dma_disable(dev, true);
-	if (ret)
-		return ret;
+	for (i = 0; i < 10; i++) {
+		ret = mt792x_dma_disable(dev, true);
+		if (ret == 0)
+			break;
+	}
+
+	if (ret < 0)
+		return ret; /* all dma disable retries failed */
 
 	/* init tx queue */
 	ret = mt76_connac_init_tx_queues(dev->phy.mt76, MT7921_TXQ_BAND0,
