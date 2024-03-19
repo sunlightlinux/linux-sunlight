@@ -788,6 +788,24 @@ static void clear_sla(struct adf_rl *rl_data, struct rl_sla *sla)
 	sla_type_arr[node_id] = NULL;
 }
 
+static void free_all_sla(struct adf_accel_dev *accel_dev)
+{
+	struct adf_rl *rl_data = accel_dev->rate_limiting;
+	int sla_id;
+
+	mutex_lock(&rl_data->rl_lock);
+
+	for (sla_id = 0; sla_id < RL_NODES_CNT_MAX; sla_id++) {
+		if (!rl_data->sla[sla_id])
+			continue;
+
+		kfree(rl_data->sla[sla_id]);
+		rl_data->sla[sla_id] = NULL;
+	}
+
+	mutex_unlock(&rl_data->rl_lock);
+}
+
 /**
  * add_update_sla() - handles the creation and the update of an SLA
  * @accel_dev: pointer to acceleration device structure
@@ -812,16 +830,15 @@ static int add_update_sla(struct adf_accel_dev *accel_dev,
 	if (!sla_in) {
 		dev_warn(&GET_DEV(accel_dev),
 			 "SLA input data pointer is missing\n");
-		ret = -EFAULT;
-		goto ret_err;
+		return -EFAULT;
 	}
+
+	mutex_lock(&rl_data->rl_lock);
 
 	/* Input validation */
 	ret = validate_user_input(accel_dev, sla_in, is_update);
 	if (ret)
 		goto ret_err;
-
-	mutex_lock(&rl_data->rl_lock);
 
 	if (is_update) {
 		ret = validate_sla_id(accel_dev, sla_in->sla_id);
@@ -1156,7 +1173,7 @@ void adf_rl_stop(struct adf_accel_dev *accel_dev)
 		return;
 
 	adf_sysfs_rl_rm(accel_dev);
-	adf_rl_remove_sla_all(accel_dev, true);
+	free_all_sla(accel_dev);
 }
 
 void adf_rl_exit(struct adf_accel_dev *accel_dev)

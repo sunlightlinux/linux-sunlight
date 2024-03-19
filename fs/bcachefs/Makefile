@@ -27,7 +27,6 @@ bcachefs-y		:=	\
 	checksum.o		\
 	clock.o			\
 	compress.o		\
-	counters.o		\
 	darray.o		\
 	debug.o			\
 	dirent.o		\
@@ -71,6 +70,7 @@ bcachefs-y		:=	\
 	reflink.o		\
 	replicas.o		\
 	sb-clean.o		\
+	sb-counters.o		\
 	sb-downgrade.o		\
 	sb-errors.o		\
 	sb-members.o		\
@@ -82,6 +82,8 @@ bcachefs-y		:=	\
 	super-io.o		\
 	sysfs.o			\
 	tests.o			\
+	time_stats.o		\
+	thread_with_file.o	\
 	trace.o			\
 	two_state_shared_lock.o	\
 	util.o			\
@@ -89,3 +91,6 @@ bcachefs-y		:=	\
 	xattr.o
 
 obj-$(CONFIG_MEAN_AND_VARIANCE_UNIT_TEST)   += mean_and_variance_test.o
+
+# Silence "note: xyz changed in GCC X.X" messages
+subdir-ccflags-y += $(call cc-disable-warning, psabi)

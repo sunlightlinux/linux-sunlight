@@ -32,7 +32,6 @@ enum AMDGPU_RESET_FLAGS {
 
 	AMDGPU_NEED_FULL_RESET = 0,
 	AMDGPU_SKIP_HW_RESET = 1,
-	AMDGPU_RESET_FOR_DEVICE_REMOVE = 2,
 };
 
 struct amdgpu_reset_context {
@@ -98,6 +97,7 @@ struct amdgpu_coredump_info {
 	struct amdgpu_task_info         reset_task_info;
 	struct timespec64               reset_time;
 	bool                            reset_vram_lost;
+	struct amdgpu_ring			*ring;
 };
 #endif
 

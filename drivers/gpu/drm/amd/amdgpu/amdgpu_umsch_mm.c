@@ -86,7 +86,7 @@ static int map_ring_data(struct amdgpu_device *adev, struct amdgpu_vm *vm,
 
 	amdgpu_sync_create(&sync);
 
-	drm_exec_init(&exec, 0);
+	drm_exec_init(&exec, 0, 0);
 	drm_exec_until_all_locked(&exec) {
 		r = drm_exec_lock_obj(&exec, &bo->tbo.base);
 		drm_exec_retry_on_contention(&exec);
@@ -149,7 +149,7 @@ static int unmap_ring_data(struct amdgpu_device *adev, struct amdgpu_vm *vm,
 	struct drm_exec exec;
 	long r;
 
-	drm_exec_init(&exec, 0);
+	drm_exec_init(&exec, 0, 0);
 	drm_exec_until_all_locked(&exec) {
 		r = drm_exec_lock_obj(&exec, &bo->tbo.base);
 		drm_exec_retry_on_contention(&exec);
@@ -358,7 +358,7 @@ static int setup_umsch_mm_test(struct amdgpu_device *adev,
 
 	memset(test->ring_data_cpu_addr, 0, sizeof(struct umsch_mm_test_ring_data));
 
-	test->ring_data_gpu_addr = AMDGPU_VA_RESERVED_SIZE;
+	test->ring_data_gpu_addr = AMDGPU_VA_RESERVED_BOTTOM;
 	r = map_ring_data(adev, test->vm, test->ring_data_obj, &test->bo_va,
 			  test->ring_data_gpu_addr, sizeof(struct umsch_mm_test_ring_data));
 	if (r)

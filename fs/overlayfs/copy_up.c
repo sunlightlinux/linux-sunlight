@@ -265,19 +265,17 @@ static int ovl_copy_up_file(struct ovl_fs *ofs, struct dentry *dentry,
 	if (IS_ERR(old_file))
 		return PTR_ERR(old_file);
 
+	/* Try to use clone_file_range to clone up within the same fs */
+	cloned = vfs_clone_file_range(old_file, 0, new_file, 0, len, 0);
+	if (cloned == len)
+		goto out_fput;
+
+	/* Couldn't clone, so now we try to copy the data */
 	error = rw_verify_area(READ, old_file, &old_pos, len);
 	if (!error)
 		error = rw_verify_area(WRITE, new_file, &new_pos, len);
 	if (error)
 		goto out_fput;
-
-	/* Try to use clone_file_range to clone up within the same fs */
-	ovl_start_write(dentry);
-	cloned = do_clone_file_range(old_file, 0, new_file, 0, len, 0);
-	ovl_end_write(dentry);
-	if (cloned == len)
-		goto out_fput;
-	/* Couldn't clone, so now we try to copy the data */
 
 	/* Check if lower fs supports seek operation */
 	if (old_file->f_mode & FMODE_LSEEK)
@@ -744,7 +742,7 @@ static int ovl_copy_up_workdir(struct ovl_copy_up_ctx *c)
 	struct inode *inode;
 	struct inode *udir = d_inode(c->destdir), *wdir = d_inode(c->workdir);
 	struct path path = { .mnt = ovl_upper_mnt(ofs) };
-	struct dentry *temp, *upper;
+	struct dentry *temp, *upper, *trap;
 	struct ovl_cu_creds cc;
 	int err;
 	struct ovl_cattr cattr = {
@@ -781,11 +779,13 @@ static int ovl_copy_up_workdir(struct ovl_copy_up_ctx *c)
 	 * temp wasn't moved before copy up completion or cleanup.
 	 */
 	ovl_start_write(c->dentry);
-	if (lock_rename(c->workdir, c->destdir) != NULL ||
-	    temp->d_parent != c->workdir) {
+	trap = lock_rename(c->workdir, c->destdir);
+	if (trap || temp->d_parent != c->workdir) {
 		/* temp or workdir moved underneath us? abort without cleanup */
 		dput(temp);
 		err = -EIO;
+		if (IS_ERR(trap))
+			goto out;
 		goto unlock;
 	} else if (err) {
 		goto cleanup;
@@ -826,6 +826,7 @@ static int ovl_copy_up_workdir(struct ovl_copy_up_ctx *c)
 		ovl_set_flag(OVL_WHITEOUTS, inode);
 unlock:
 	unlock_rename(c->workdir, c->destdir);
+out:
 	ovl_end_write(c->dentry);
 
 	return err;
@@ -952,6 +953,13 @@ static int ovl_do_copy_up(struct ovl_copy_up_ctx *c)
 		err = -EIO;
 		goto out_free_fh;
 	} else {
+		/*
+		 * c->dentry->d_name is stabilzed by ovl_copy_up_start(),
+		 * because if we got here, it means that c->dentry has no upper
+		 * alias and changing ->d_name means going through ovl_rename()
+		 * that will call ovl_copy_up() on source and target dentry.
+		 */
+		c->destname = c->dentry->d_name;
 		/*
 		 * Mark parent "impure" because it may now contain non-pure
 		 * upper
@@ -1132,7 +1140,6 @@ static int ovl_copy_up_one(struct dentry *parent, struct dentry *dentry,
 	if (parent) {
 		ovl_path_upper(parent, &parentpath);
 		ctx.destdir = parentpath.dentry;
-		ctx.destname = dentry->d_name;
 
 		err = vfs_getattr(&parentpath, &ctx.pstat,
 				  STATX_ATIME | STATX_MTIME,

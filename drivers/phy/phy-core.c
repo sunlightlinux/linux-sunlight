@@ -700,8 +700,8 @@ EXPORT_SYMBOL_GPL(devm_phy_put);
  * should provide a custom of_xlate function that reads the *args* and returns
  * the appropriate phy.
  */
-struct phy *of_phy_simple_xlate(struct device *dev, struct of_phandle_args
-	*args)
+struct phy *of_phy_simple_xlate(struct device *dev,
+				const struct of_phandle_args *args)
 {
 	struct phy *phy;
 	struct class_dev_iter iter;
@@ -959,7 +959,7 @@ struct phy *phy_create(struct device *dev, struct device_node *node,
 	if (!phy)
 		return ERR_PTR(-ENOMEM);
 
-	id = ida_simple_get(&phy_ida, 0, 0, GFP_KERNEL);
+	id = ida_alloc(&phy_ida, GFP_KERNEL);
 	if (id < 0) {
 		dev_err(dev, "unable to get id\n");
 		ret = id;
@@ -1095,7 +1095,7 @@ EXPORT_SYMBOL_GPL(devm_phy_destroy);
 struct phy_provider *__of_phy_provider_register(struct device *dev,
 	struct device_node *children, struct module *owner,
 	struct phy * (*of_xlate)(struct device *dev,
-				 struct of_phandle_args *args))
+				 const struct of_phandle_args *args))
 {
 	struct phy_provider *phy_provider;
 
@@ -1158,7 +1158,7 @@ EXPORT_SYMBOL_GPL(__of_phy_provider_register);
 struct phy_provider *__devm_of_phy_provider_register(struct device *dev,
 	struct device_node *children, struct module *owner,
 	struct phy * (*of_xlate)(struct device *dev,
-				 struct of_phandle_args *args))
+				 const struct of_phandle_args *args))
 {
 	struct phy_provider **ptr, *phy_provider;
 
@@ -1232,7 +1232,7 @@ static void phy_release(struct device *dev)
 	dev_vdbg(dev, "releasing '%s'\n", dev_name(dev));
 	debugfs_remove_recursive(phy->debugfs);
 	regulator_put(phy->pwr);
-	ida_simple_remove(&phy_ida, phy->id);
+	ida_free(&phy_ida, phy->id);
 	kfree(phy);
 }
 

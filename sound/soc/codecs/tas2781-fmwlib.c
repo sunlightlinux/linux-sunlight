@@ -1531,7 +1531,7 @@ static int tasdev_load_blk(struct tasdevice_priv *tas_priv,
 	unsigned int sleep_time;
 	unsigned int len;
 	unsigned int nr_cmds;
-	unsigned char *data = block->data;
+	unsigned char *data;
 	unsigned char crc_chksum = 0;
 	unsigned char offset;
 	unsigned char book;
@@ -1982,6 +1982,7 @@ static int tasdevice_dspfw_ready(const struct firmware *fmw,
 	case 0x301:
 	case 0x302:
 	case 0x502:
+	case 0x503:
 		tas_priv->fw_parse_variable_header =
 			fw_parse_variable_header_kernel;
 		tas_priv->fw_parse_program_data =
