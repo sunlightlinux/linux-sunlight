@@ -100,10 +100,10 @@
 #include <linux/stackprotector.h>
 #include <linux/user_events.h>
 #include <linux/iommu.h>
-#include <linux/cpufreq_times.h>
-#include <linux/rseq.h>
 #include <uapi/linux/pidfd.h>
 #include <linux/pidfs.h>
+#include <linux/rseq.h>
+#include <linux/cpufreq_times.h>
 
 #include <asm/pgalloc.h>
 #include <linux/uaccess.h>
