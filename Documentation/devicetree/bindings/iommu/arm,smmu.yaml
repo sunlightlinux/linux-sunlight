@@ -515,9 +515,8 @@ allOf:
       properties:
         compatible:
           items:
-            - enum:
-                - qcom,sm8550-smmu-500
-                - qcom,sm8650-smmu-500
+            - const: qcom,sm8550-smmu-500
+            - const: qcom,sm8650-smmu-500
             - const: qcom,adreno-smmu
             - const: qcom,smmu-500
             - const: arm,mmu-500
