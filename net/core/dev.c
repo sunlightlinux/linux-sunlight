@@ -2294,7 +2294,7 @@ void dev_queue_xmit_nit(struct sk_buff *skb, struct net_device *dev)
 	rcu_read_lock();
 again:
 	list_for_each_entry_rcu(ptype, ptype_list, list) {
-		if (ptype->ignore_outgoing)
+		if (READ_ONCE(ptype->ignore_outgoing))
 			continue;
 
 		/* Never send packets back to the socket
@@ -6787,10 +6787,40 @@ static void napi_threaded_poll_loop(struct napi_struct *napi)
 static int napi_threaded_poll(void *data)
 {
 	struct napi_struct *napi = data;
+	struct softnet_data *sd;
+	void *have;
 
-	while (!napi_thread_wait(napi))
-		napi_threaded_poll_loop(napi);
+	while (!napi_thread_wait(napi)) {
+		unsigned long last_qs = jiffies;
 
+		for (;;) {
+			bool repoll = false;
+
+			local_bh_disable();
+			sd = this_cpu_ptr(&softnet_data);
+			sd->in_napi_threaded_poll = true;
+
+			have = netpoll_poll_lock(napi);
+			__napi_poll(napi, &repoll);
+			netpoll_poll_unlock(have);
+
+			sd->in_napi_threaded_poll = false;
+			barrier();
+
+			if (sd_has_rps_ipi_waiting(sd)) {
+				local_irq_disable();
+				net_rps_action_and_irq_enable(sd);
+			}
+			skb_defer_free_flush(sd);
+			local_bh_enable();
+
+			if (!repoll)
+				break;
+
+			rcu_softirq_qs_periodic(last_qs);
+			cond_resched();
+		}
+	}
 	return 0;
 }
 
@@ -11689,11 +11719,12 @@ static void __init net_dev_struct_check(void)
 
 	/* TXRX read-mostly hotpath */
 	CACHELINE_ASSERT_GROUP_MEMBER(struct net_device, net_device_read_txrx, lstats);
+	CACHELINE_ASSERT_GROUP_MEMBER(struct net_device, net_device_read_txrx, state);
 	CACHELINE_ASSERT_GROUP_MEMBER(struct net_device, net_device_read_txrx, flags);
 	CACHELINE_ASSERT_GROUP_MEMBER(struct net_device, net_device_read_txrx, hard_header_len);
 	CACHELINE_ASSERT_GROUP_MEMBER(struct net_device, net_device_read_txrx, features);
 	CACHELINE_ASSERT_GROUP_MEMBER(struct net_device, net_device_read_txrx, ip6_ptr);
-	CACHELINE_ASSERT_GROUP_SIZE(struct net_device, net_device_read_txrx, 38);
+	CACHELINE_ASSERT_GROUP_SIZE(struct net_device, net_device_read_txrx, 46);
 
 	/* RX read-mostly hotpath */
 	CACHELINE_ASSERT_GROUP_MEMBER(struct net_device, net_device_read_rx, ptype_specific);
