@@ -916,28 +916,6 @@ void power_supply_put_battery_info(struct power_supply *psy,
 }
 EXPORT_SYMBOL_GPL(power_supply_put_battery_info);
 
-const enum power_supply_property power_supply_battery_info_properties[] = {
-	POWER_SUPPLY_PROP_TECHNOLOGY,
-	POWER_SUPPLY_PROP_ENERGY_FULL_DESIGN,
-	POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN,
-	POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN,
-	POWER_SUPPLY_PROP_VOLTAGE_MAX_DESIGN,
-	POWER_SUPPLY_PROP_PRECHARGE_CURRENT,
-	POWER_SUPPLY_PROP_CHARGE_TERM_CURRENT,
-	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX,
-	POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE_MAX,
-	POWER_SUPPLY_PROP_TEMP_AMBIENT_ALERT_MIN,
-	POWER_SUPPLY_PROP_TEMP_AMBIENT_ALERT_MAX,
-	POWER_SUPPLY_PROP_TEMP_ALERT_MIN,
-	POWER_SUPPLY_PROP_TEMP_ALERT_MAX,
-	POWER_SUPPLY_PROP_TEMP_MIN,
-	POWER_SUPPLY_PROP_TEMP_MAX,
-};
-EXPORT_SYMBOL_GPL(power_supply_battery_info_properties);
-
-const size_t power_supply_battery_info_properties_size = ARRAY_SIZE(power_supply_battery_info_properties);
-EXPORT_SYMBOL_GPL(power_supply_battery_info_properties_size);
-
 /**
  * power_supply_temp2resist_simple() - find the battery internal resistance
  * percent from temperature

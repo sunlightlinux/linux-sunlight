@@ -172,6 +172,7 @@ export KBUILD_MIXED_TREE
 # within __modinst_pre.
 # TODO(b/205893923): Revert this hack once it is properly handled.
 export mixed-build-prefix
+
 # backward compatibility
 KBUILD_EXTRA_WARN ?= $(KBUILD_ENABLE_EXTRA_GCC_CHECKS)
 
