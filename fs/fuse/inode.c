@@ -1390,6 +1390,8 @@ static int free_fuse_passthrough(int id, void *p, void *data)
 void fuse_free_conn(struct fuse_conn *fc)
 {
 	WARN_ON(!list_empty(&fc->devices));
+	idr_for_each(&fc->passthrough_req, free_fuse_passthrough, NULL);
+	idr_destroy(&fc->passthrough_req);
 	kfree(fc);
 }
 EXPORT_SYMBOL_GPL(fuse_free_conn);
