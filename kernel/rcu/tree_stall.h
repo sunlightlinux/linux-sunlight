@@ -7,9 +7,9 @@
  * Author: Paul E. McKenney <paulmck@linux.ibm.com>
  */
 
+#include <linux/console.h>
 #include <linux/kvm_para.h>
 #include <linux/rcu_notifier.h>
-#include <linux/console.h>
 
 //////////////////////////////////////////////////////////////////////////////
 //
@@ -658,11 +658,11 @@ static void print_other_cpu_stall(unsigned long gp_seq, unsigned long gps)
 	rcu_check_gp_kthread_expired_fqs_timer();
 	rcu_check_gp_kthread_starvation();
 
+	nbcon_cpu_emergency_exit();
+
 	panic_on_rcu_stall();
 
 	rcu_force_quiescent_state();  /* Kick them all. */
-
-	nbcon_cpu_emergency_exit();
 }
 
 static void print_cpu_stall(unsigned long gps)
@@ -679,6 +679,8 @@ static void print_cpu_stall(unsigned long gps)
 	rcu_stall_kick_kthreads();
 	if (rcu_stall_is_suppressed())
 		return;
+
+	nbcon_cpu_emergency_enter();
 
 	/*
 	 * OK, time to rat on ourselves...
@@ -707,6 +709,8 @@ static void print_cpu_stall(unsigned long gps)
 		WRITE_ONCE(rcu_state.jiffies_stall,
 			   jiffies + 3 * rcu_jiffies_till_stall_check() + 3);
 	raw_spin_unlock_irqrestore_rcu_node(rnp, flags);
+
+	nbcon_cpu_emergency_exit();
 
 	panic_on_rcu_stall();
 

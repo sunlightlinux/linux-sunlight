@@ -601,35 +601,37 @@ static void univ8250_console_write(struct console *co, const char *s,
 	serial8250_console_write(up, s, count);
 }
 #else
-static bool univ8250_console_write_atomic(struct console *co,
+static void univ8250_console_write_atomic(struct console *co,
 					  struct nbcon_write_context *wctxt)
 {
 	struct uart_8250_port *up = &serial8250_ports[co->index];
 
-	return serial8250_console_write_atomic(up, wctxt);
+	serial8250_console_write_atomic(up, wctxt);
 }
 
-static bool univ8250_console_write_thread(struct console *co,
+static void univ8250_console_write_thread(struct console *co,
 					  struct nbcon_write_context *wctxt)
 {
 	struct uart_8250_port *up = &serial8250_ports[co->index];
 
-	return serial8250_console_write_thread(up, wctxt);
+	serial8250_console_write_thread(up, wctxt);
 }
 
-static void univ8250_console_driver_enter(struct console *con, unsigned long *flags)
+static void univ8250_console_device_lock(struct console *con, unsigned long *flags)
 {
 	struct uart_port *up = &serial8250_ports[con->index].port;
 
 	__uart_port_lock_irqsave(up, flags);
 }
 
-static void univ8250_console_driver_exit(struct console *con, unsigned long flags)
+static void univ8250_console_device_unlock(struct console *con, unsigned long flags)
 {
 	struct uart_port *up = &serial8250_ports[con->index].port;
 
 	__uart_port_unlock_irqrestore(up, flags);
 }
+
+static struct nbcon_drvdata serial8250_nbcon_drvdata;
 #endif /* CONFIG_SERIAL_8250_LEGACY_CONSOLE */
 
 static int univ8250_console_setup(struct console *co, char *options)
@@ -659,11 +661,11 @@ static int univ8250_console_setup(struct console *co, char *options)
 
 	port = &serial8250_ports[co->index].port;
 	/* link port to console */
-	port->cons = co;
+	uart_port_set_cons(port, co);
 
 	retval = serial8250_console_setup(port, options, false);
 	if (retval != 0)
-		port->cons = NULL;
+		uart_port_set_cons(port, NULL);
 	return retval;
 }
 
@@ -721,7 +723,7 @@ static int univ8250_console_match(struct console *co, char *name, int idx,
 			continue;
 
 		co->index = i;
-		port->cons = co;
+		uart_port_set_cons(port, co);
 		return serial8250_console_setup(port, options, true);
 	}
 
@@ -736,9 +738,10 @@ static struct console univ8250_console = {
 #else
 	.write_atomic	= univ8250_console_write_atomic,
 	.write_thread	= univ8250_console_write_thread,
-	.driver_enter	= univ8250_console_driver_enter,
-	.driver_exit	= univ8250_console_driver_exit,
+	.device_lock	= univ8250_console_device_lock,
+	.device_unlock	= univ8250_console_device_unlock,
 	.flags		= CON_PRINTBUFFER | CON_ANYTIME | CON_NBCON,
+	.nbcon_drvdata	= &serial8250_nbcon_drvdata,
 #endif
 	.device		= uart_console_device,
 	.setup		= univ8250_console_setup,

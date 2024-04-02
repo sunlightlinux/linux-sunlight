@@ -200,8 +200,8 @@ DEFINE_STATIC_KEY_FALSE(force_printkthreads_key);
 
 static int __init setup_forced_printkthreads(char *arg)
 {
-        static_branch_enable(&force_printkthreads_key);
-        return 0;
+	static_branch_enable(&force_printkthreads_key);
+	return 0;
 }
 early_param("threadprintk", setup_forced_printkthreads);
 #endif
@@ -486,7 +486,7 @@ bool have_legacy_console;
  * synchronous printing of legacy consoles will not occur during panic until
  * the backtrace has been stored to the ringbuffer.
  */
-bool have_nbcon_console;
+static bool have_nbcon_console;
 
 /*
  * Specifies if a boot console is registered. If boot consoles are present,
@@ -2347,11 +2347,15 @@ static bool legacy_allow_panic_sync;
 
 /*
  * This acts as a one-way switch to allow legacy consoles to print from
- * the printk() caller context on a panic CPU.
+ * the printk() caller context on a panic CPU. It also attempts to flush
+ * the legacy consoles in this context.
  */
 void printk_legacy_allow_panic_sync(void)
 {
 	legacy_allow_panic_sync = true;
+
+	if (printing_via_unlock && !in_nmi() && console_trylock())
+		console_unlock();
 }
 
 asmlinkage int vprintk_emit(int facility, int level,
@@ -2384,7 +2388,7 @@ asmlinkage int vprintk_emit(int facility, int level,
 
 	printed_len = vprintk_store(facility, level, dev_info, fmt, args);
 
-	if (!have_boot_console && have_nbcon_console) {
+	if (have_nbcon_console && !have_boot_console) {
 		bool is_panic_context = this_cpu_in_panic();
 
 		/*
@@ -2417,7 +2421,7 @@ asmlinkage int vprintk_emit(int facility, int level,
 		if (is_panic_context ||
 		    !printk_threads_enabled ||
 		    (system_state > SYSTEM_RUNNING)) {
-			nbcon_atomic_flush_all();
+			nbcon_atomic_flush_pending();
 		}
 	}
 
@@ -2436,19 +2440,15 @@ asmlinkage int vprintk_emit(int facility, int level,
 		preempt_disable();
 
 		/*
-		 * Do not emit for EMERGENCY priority. The console will be
+		 * Try to acquire and then immediately release the console
+		 * semaphore. The release will print out buffers. With the
+		 * spinning variant, this context tries to take over the
+		 * printing from another printing context.
+		 *
+		 * Skip it in EMERGENCY priority. The console will be
 		 * explicitly flushed when exiting the emergency section.
 		 */
-		if (nbcon_get_default_prio() == NBCON_PRIO_EMERGENCY) {
-			do_trylock_unlock = false;
-		} else {
-			/*
-			 * Try to acquire and then immediately release the
-			 * console semaphore. The release will print out
-			 * buffers. With the spinning variant, this context
-			 * tries to take over the printing from another
-			 * printing context.
-			 */
+		if (nbcon_get_default_prio() != NBCON_PRIO_EMERGENCY) {
 			if (console_trylock_spinning())
 				console_unlock();
 		}
@@ -2838,30 +2838,25 @@ static void __console_unlock(void)
 #ifdef CONFIG_PRINTK
 
 /*
- * Prepend the message in @pmsg->pbufs->outbuf with a "dropped message". This
- * is achieved by shifting the existing message over and inserting the dropped
- * message.
+ * Prepend the message in @pmsg->pbufs->outbuf with the message in
+ * @pmsg->pbufs->scratchbuf. This is achieved by shifting the existing message
+ * over and inserting the scratchbuf message.
  *
  * @pmsg is the printk message to prepend.
  *
- * @dropped is the dropped count to report in the dropped message.
+ * @len is the length of the message in @pmsg->pbufs->scratchbuf.
  *
  * If the message text in @pmsg->pbufs->outbuf does not have enough space for
- * the dropped message, the message text will be sufficiently truncated.
+ * the scratchbuf message, the message text will be sufficiently truncated.
  *
  * If @pmsg->pbufs->outbuf is modified, @pmsg->outbuf_len is updated.
  */
-void console_prepend_dropped(struct printk_message *pmsg, unsigned long dropped)
+static void __console_prepend_scratch(struct printk_message *pmsg, size_t len)
 {
 	struct printk_buffers *pbufs = pmsg->pbufs;
-	const size_t scratchbuf_sz = sizeof(pbufs->scratchbuf);
 	const size_t outbuf_sz = sizeof(pbufs->outbuf);
 	char *scratchbuf = &pbufs->scratchbuf[0];
 	char *outbuf = &pbufs->outbuf[0];
-	size_t len;
-
-	len = scnprintf(scratchbuf, scratchbuf_sz,
-		       "** %lu printk messages dropped **\n", dropped);
 
 	/*
 	 * Make sure outbuf is sufficiently large before prepending.
@@ -2881,6 +2876,46 @@ void console_prepend_dropped(struct printk_message *pmsg, unsigned long dropped)
 	memmove(outbuf + len, outbuf, pmsg->outbuf_len + 1);
 	memcpy(outbuf, scratchbuf, len);
 	pmsg->outbuf_len += len;
+}
+
+/*
+ * Prepend the message in @pmsg->pbufs->outbuf with a "dropped message".
+ * @pmsg->outbuf_len is updated appropriately.
+ *
+ * @pmsg is the printk message to prepend.
+ *
+ * @dropped is the dropped count to report in the dropped message.
+ */
+void console_prepend_dropped(struct printk_message *pmsg, unsigned long dropped)
+{
+	struct printk_buffers *pbufs = pmsg->pbufs;
+	const size_t scratchbuf_sz = sizeof(pbufs->scratchbuf);
+	char *scratchbuf = &pbufs->scratchbuf[0];
+	size_t len;
+
+	len = scnprintf(scratchbuf, scratchbuf_sz,
+		       "** %lu printk messages dropped **\n", dropped);
+
+	__console_prepend_scratch(pmsg, len);
+}
+
+/*
+ * Prepend the message in @pmsg->pbufs->outbuf with a "replay message".
+ * @pmsg->outbuf_len is updated appropriately.
+ *
+ * @pmsg is the printk message to prepend.
+ */
+void console_prepend_replay(struct printk_message *pmsg)
+{
+	struct printk_buffers *pbufs = pmsg->pbufs;
+	const size_t scratchbuf_sz = sizeof(pbufs->scratchbuf);
+	char *scratchbuf = &pbufs->scratchbuf[0];
+	size_t len;
+
+	len = scnprintf(scratchbuf, scratchbuf_sz,
+			"** replaying previous printk message **\n");
+
+	__console_prepend_scratch(pmsg, len);
 }
 
 /*
@@ -2962,7 +2997,7 @@ out:
 static inline void printk_legacy_lock_map_acquire_try(void) { }
 static inline void printk_legacy_lock_map_release(void) { }
 #else
-DEFINE_WAIT_OVERRIDE_MAP(printk_legacy_map, LD_WAIT_SLEEP);
+static DEFINE_WAIT_OVERRIDE_MAP(printk_legacy_map, LD_WAIT_SLEEP);
 
 static inline void printk_legacy_lock_map_acquire_try(void)
 {
@@ -3136,7 +3171,6 @@ static bool console_flush_all(bool do_cond_resched, u64 *next_seq, bool *handove
 				printk_seq = nbcon_seq_read(con);
 			} else {
 				progress = console_emit_next_record(con, handover, cookie);
-
 				printk_seq = con->seq;
 			}
 
@@ -3375,7 +3409,7 @@ void console_flush_on_panic(enum con_flush_mode mode)
 		console_srcu_read_unlock(cookie);
 	}
 
-	nbcon_atomic_flush_all();
+	nbcon_atomic_flush_pending();
 
 	if (printing_via_unlock)
 		console_flush_all(false, &next_seq, &handover);
@@ -3634,6 +3668,7 @@ static void try_enable_default_console(struct console *newcon)
 		newcon->flags |= CON_CONSDEV;
 }
 
+/* Set @newcon->seq to the first record this console should print. */
 static void console_init_seq(struct console *newcon, bool bootcon_registered)
 {
 	struct console *con;
@@ -3733,6 +3768,7 @@ void register_console(struct console *newcon)
 	struct console *con;
 	bool bootcon_registered = false;
 	bool realcon_registered = false;
+	unsigned long flags;
 	int err;
 
 	console_list_lock();
@@ -3815,6 +3851,14 @@ void register_console(struct console *newcon)
 	if (newcon->flags & CON_NBCON) {
 		have_nbcon_console = true;
 		nbcon_init(newcon);
+
+		/*
+		 * nbcon consoles have their own sequence counter. The legacy
+		 * sequence counter is reset so that it is clear it is not
+		 * being used.
+		 */
+		nbcon_seq_force(newcon, newcon->seq);
+		newcon->seq = 0;
 	} else {
 		have_legacy_console = true;
 		nbcon_legacy_kthread_create();
@@ -3822,6 +3866,19 @@ void register_console(struct console *newcon)
 
 	if (newcon->flags & CON_BOOT)
 		have_boot_console = true;
+
+	/*
+	 * If another context is actively using the hardware of this new
+	 * console, it will not be aware of the nbcon synchronization. This
+	 * is a risk that two contexts could access the hardware
+	 * simultaneously if this new console is used for atomic printing
+	 * and the other context is still using the hardware.
+	 *
+	 * Use the driver synchronization to ensure that the hardware is not
+	 * in use while this new console transitions to being registered.
+	 */
+	if ((newcon->flags & CON_NBCON) && newcon->write_atomic)
+		newcon->device_lock(newcon, &flags);
 
 	/*
 	 * Put this console in the list - keep the
@@ -3846,6 +3903,10 @@ void register_console(struct console *newcon)
 	 * on all contexts being able to see the new console before
 	 * register_console() completes.
 	 */
+
+	/* This new console is now registered. */
+	if ((newcon->flags & CON_NBCON) && newcon->write_atomic)
+		newcon->device_unlock(newcon, flags);
 
 	console_sysfs_notify();
 
@@ -3941,11 +4002,11 @@ static int unregister_console_locked(struct console *console)
 			found_legacy_con = true;
 	}
 	if (!found_boot_con)
-		have_boot_console = false;
+		have_boot_console = found_boot_con;
 	if (!found_legacy_con)
-		have_legacy_console = false;
+		have_legacy_console = found_legacy_con;
 	if (!found_nbcon_con)
-		have_nbcon_console = false;
+		have_nbcon_console = found_nbcon_con;
 
 	/*
 	 * When the last boot console unregisters, start up the
@@ -4150,6 +4211,13 @@ static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progre
 			locked = true;
 		}
 
+		/*
+		 * Ensure the compiler does not optimize @locked to be
+		 * @printing_via_unlock since the latter can change at any
+		 * time.
+		 */
+		barrier();
+
 		cookie = console_srcu_read_lock();
 		for_each_console_srcu(c) {
 			if (con && con != c)
@@ -4260,6 +4328,7 @@ static void __wake_up_klogd(int val)
 		return;
 
 	preempt_disable();
+
 	/*
 	 * Guarantee any new records can be seen by tasks preparing to wait
 	 * before this context checks if the wait queue is empty.
@@ -4271,11 +4340,22 @@ static void __wake_up_klogd(int val)
 	 *
 	 * This pairs with devkmsg_read:A and syslog_print:A.
 	 */
-	if (wq_has_sleeper(&log_wait) || /* LMM(__wake_up_klogd:A) */
-	    (val & PRINTK_PENDING_OUTPUT)) {
+	if (!wq_has_sleeper(&log_wait)) /* LMM(__wake_up_klogd:A) */
+		val &= ~PRINTK_PENDING_WAKEUP;
+
+	/*
+	 * Simple read is safe. register_console() would flush a newly
+	 * registered legacy console when writing the message about it
+	 * being enabled.
+	 */
+	if (!printing_via_unlock)
+		val &= ~PRINTK_PENDING_OUTPUT;
+
+	if (val) {
 		this_cpu_or(printk_pending, val);
 		irq_work_queue(this_cpu_ptr(&wake_up_klogd_work));
 	}
+
 	preempt_enable();
 }
 
@@ -4312,11 +4392,7 @@ void defer_console_output(void)
 	 * New messages may have been added directly to the ringbuffer
 	 * using vprintk_store(), so wake any waiters as well.
 	 */
-	int val = PRINTK_PENDING_WAKEUP;
-
-	if (printing_via_unlock)
-		val |= PRINTK_PENDING_OUTPUT;
-	__wake_up_klogd(val);
+	__wake_up_klogd(PRINTK_PENDING_WAKEUP | PRINTK_PENDING_OUTPUT);
 }
 
 void printk_trigger_flush(void)
