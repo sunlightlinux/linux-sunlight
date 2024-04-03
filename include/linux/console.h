@@ -424,9 +424,8 @@ struct console {
 	 * migrate_disable().
 	 *
 	 * The flags argument is provided as a convenience to the driver. It
-	 * will be passed again to device_unlock() when printing is completed
-	 * (for example, if spin_lock_irqsave() was used). It can be ignored
-	 * if the driver does not need it.
+	 * will be passed again to device_unlock(). It can be ignored if the
+	 * driver does not need it.
 	 */
 	void (*device_lock)(struct console *con, unsigned long *flags);
 

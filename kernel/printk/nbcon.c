@@ -1392,7 +1392,7 @@ static void __nbcon_atomic_flush_pending(u64 stop_seq, bool allow_unsafe_takeove
 			 * lock for uart consoles). Therefore IRQs must be
 			 * disabled to avoid being interrupted and then
 			 * calling into a driver that will deadlock trying
-			 * acquire console ownership.
+			 * to acquire console ownership.
 			 */
 			local_irq_save(irq_flags);
 

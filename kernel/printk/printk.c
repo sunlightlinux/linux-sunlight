@@ -476,7 +476,7 @@ static DEFINE_MUTEX(syslog_lock);
 
 /*
  * Specifies if a legacy console is registered. If legacy consoles are
- * present, it is necessary to perform the console_lock/console_unlock dance
+ * present, it is necessary to perform the console lock/unlock dance
  * whenever console flushing should occur.
  */
 bool have_legacy_console;
@@ -2354,8 +2354,10 @@ void printk_legacy_allow_panic_sync(void)
 {
 	legacy_allow_panic_sync = true;
 
-	if (printing_via_unlock && !in_nmi() && console_trylock())
-		console_unlock();
+	if (printing_via_unlock && !in_nmi()) {
+		if (console_trylock())
+			console_unlock();
+	}
 }
 
 asmlinkage int vprintk_emit(int facility, int level,
@@ -2413,10 +2415,9 @@ asmlinkage int vprintk_emit(int facility, int level,
 		 * - During shutdown, since the printing threads may not get
 		 *   a chance to print the final messages.
 		 *
-		 * Note that if boot consoles are registered, the
-		 * console_lock/console_unlock dance must be relied upon
-		 * instead because nbcon consoles cannot print simultaneously
-		 * with boot consoles.
+		 * Note that if boot consoles are registered, the console
+		 * lock/unlock dance must be relied upon instead because nbcon
+		 * consoles cannot print simultaneously with boot consoles.
 		 */
 		if (is_panic_context ||
 		    !printk_threads_enabled ||
@@ -4174,7 +4175,6 @@ static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progre
 	u64 last_diff = 0;
 	u64 printk_seq;
 	short flags;
-	bool locked;
 	int cookie;
 	u64 diff;
 	u64 seq;
@@ -4196,11 +4196,18 @@ static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progre
 	for (;;) {
 		unsigned long begin_jiffies;
 		unsigned long slept_jiffies;
+		bool use_console_lock = printing_via_unlock;
 
-		locked = false;
+		/*
+		 * Ensure the compiler does not optimize @use_console_lock to
+		 * be @printing_via_unlock since the latter can change at any
+		 * time.
+		 */
+		barrier();
+
 		diff = 0;
 
-		if (printing_via_unlock) {
+		if (use_console_lock) {
 			/*
 			 * Hold the console_lock to guarantee safe access to
 			 * console->seq. Releasing console_lock flushes more
@@ -4208,15 +4215,7 @@ static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progre
 			 * usable consoles.
 			 */
 			console_lock();
-			locked = true;
 		}
-
-		/*
-		 * Ensure the compiler does not optimize @locked to be
-		 * @printing_via_unlock since the latter can change at any
-		 * time.
-		 */
-		barrier();
 
 		cookie = console_srcu_read_lock();
 		for_each_console_srcu(c) {
@@ -4238,7 +4237,7 @@ static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progre
 			if (flags & CON_NBCON) {
 				printk_seq = nbcon_seq_read(c);
 			} else {
-				WARN_ON_ONCE(!locked);
+				WARN_ON_ONCE(!use_console_lock);
 				printk_seq = c->seq;
 			}
 
@@ -4250,7 +4249,7 @@ static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progre
 		if (diff != last_diff && reset_on_progress)
 			remaining_jiffies = timeout_jiffies;
 
-		if (locked)
+		if (use_console_lock)
 			console_unlock();
 
 		/* Note: @diff is 0 if there are no usable consoles. */
