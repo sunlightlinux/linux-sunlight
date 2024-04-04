@@ -6754,6 +6754,7 @@ static void skb_defer_free_flush(struct softnet_data *sd)
 static void napi_threaded_poll_loop(struct napi_struct *napi)
 {
 	struct softnet_data *sd;
+	unsigned long last_qs = jiffies;
 
 	for (;;) {
 		bool repoll = false;
@@ -6780,6 +6781,7 @@ static void napi_threaded_poll_loop(struct napi_struct *napi)
 		if (!repoll)
 			break;
 
+		rcu_softirq_qs_periodic(last_qs);
 		cond_resched();
 	}
 }
@@ -6787,40 +6789,10 @@ static void napi_threaded_poll_loop(struct napi_struct *napi)
 static int napi_threaded_poll(void *data)
 {
 	struct napi_struct *napi = data;
-	struct softnet_data *sd;
-	void *have;
 
-	while (!napi_thread_wait(napi)) {
-		unsigned long last_qs = jiffies;
+	while (!napi_thread_wait(napi))
+		napi_threaded_poll_loop(napi);
 
-		for (;;) {
-			bool repoll = false;
-
-			local_bh_disable();
-			sd = this_cpu_ptr(&softnet_data);
-			sd->in_napi_threaded_poll = true;
-
-			have = netpoll_poll_lock(napi);
-			__napi_poll(napi, &repoll);
-			netpoll_poll_unlock(have);
-
-			sd->in_napi_threaded_poll = false;
-			barrier();
-
-			if (sd_has_rps_ipi_waiting(sd)) {
-				local_irq_disable();
-				net_rps_action_and_irq_enable(sd);
-			}
-			skb_defer_free_flush(sd);
-			local_bh_enable();
-
-			if (!repoll)
-				break;
-
-			rcu_softirq_qs_periodic(last_qs);
-			cond_resched();
-		}
-	}
 	return 0;
 }
 

@@ -9,7 +9,7 @@
 #include <linux/ratelimit_types.h>
 #include <linux/once_lite.h>
 
-struct uart_port;
+struct console;
 
 extern const char linux_banner[];
 extern const char linux_proc_banner[];
@@ -159,8 +159,6 @@ int _printk(const char *fmt, ...);
  */
 __printf(1, 2) __cold int _printk_deferred(const char *fmt, ...);
 
-extern void __printk_safe_enter(void);
-extern void __printk_safe_exit(void);
 extern void __printk_deferred_enter(void);
 extern void __printk_deferred_exit(void);
 
@@ -198,8 +196,8 @@ extern asmlinkage void dump_stack_lvl(const char *log_lvl) __cold;
 extern asmlinkage void dump_stack(void) __cold;
 void printk_trigger_flush(void);
 void printk_legacy_allow_panic_sync(void);
-extern void uart_nbcon_acquire(struct uart_port *up);
-extern void uart_nbcon_release(struct uart_port *up);
+extern void nbcon_driver_acquire(struct console *con);
+extern void nbcon_driver_release(struct console *con);
 void nbcon_atomic_flush_unsafe(void);
 #else
 static inline __printf(1, 0)
@@ -285,11 +283,11 @@ static inline void printk_legacy_allow_panic_sync(void)
 {
 }
 
-static inline void uart_nbcon_acquire(struct uart_port *up)
+static inline void nbcon_driver_acquire(struct console *con)
 {
 }
 
-static inline void uart_nbcon_release(struct uart_port *up)
+static inline void nbcon_driver_release(struct console *con)
 {
 }
 

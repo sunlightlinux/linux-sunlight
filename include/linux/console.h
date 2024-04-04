@@ -285,6 +285,25 @@ struct nbcon_write_context {
 };
 
 /**
+ * struct nbcon_drvdata - Data to allow nbcon acquire in non-print context
+ * @ctxt:		The core console context
+ * @srcu_cookie:	Storage for a console_srcu_lock cookie, if needed
+ * @owner_index:	Storage for the owning console index, if needed
+ * @locked:		Storage for the locked state, if needed
+ *
+ * All fields (except for @ctxt) are available exclusively to the driver to
+ * use as needed. They are not used by the printk subsystem.
+ */
+struct nbcon_drvdata {
+	struct nbcon_context	__private ctxt;
+
+	/* reserved for driver use */
+	int			srcu_cookie;
+	short			owner_index;
+	bool			locked;
+};
+
+/**
  * struct console - The console descriptor structure
  * @name:		The name of the console driver
  * @write:		Legacy write callback to output messages (Optional)
@@ -306,6 +325,7 @@ struct nbcon_write_context {
  *
  * @nbcon_state:	State for nbcon consoles
  * @nbcon_seq:		Sequence number of the next record for nbcon to print
+ * @nbcon_prev_seq:	Seq num the previous nbcon owner was assigned to print
  * @pbufs:		Pointer to nbcon private buffer
  * @kthread:		Printer kthread for this console
  * @rcuwait:		RCU-safe wait object for @kthread waking
@@ -335,7 +355,7 @@ struct console {
 	/**
 	 * @write_atomic:
 	 *
-	 * NBCON callback to write out text in any context. (Optional)
+	 * NBCON callback to write out text in any context.
 	 *
 	 * This callback is called with the console already acquired. The
 	 * callback can use nbcon_can_proceed() at any time to verify that
@@ -359,11 +379,8 @@ struct console {
 	 * This callback can be called from any context (including NMI).
 	 * Therefore it must avoid usage of any locking and instead rely
 	 * on the console ownership for synchronization.
-	 *
-	 * Returns true if all text was successfully written out and
-	 * ownership was never lost, otherwise false.
 	 */
-	bool (*write_atomic)(struct console *con, struct nbcon_write_context *wctxt);
+	void (*write_atomic)(struct console *con, struct nbcon_write_context *wctxt);
 
 	/**
 	 * @write_thread:
@@ -372,7 +389,7 @@ struct console {
 	 *
 	 * This callback is called with the console already acquired. Any
 	 * additional driver synchronization should have been performed by
-	 * driver_enter().
+	 * device_lock().
 	 *
 	 * This callback is always called from task context but with migration
 	 * disabled.
@@ -383,60 +400,69 @@ struct console {
 	 * during normal operation and is always called from task context.
 	 * This provides drivers with a relatively relaxed locking context
 	 * for synchronizing output to the hardware.
-	 *
-	 * Returns true if all text was successfully written out, otherwise
-	 * false.
 	 */
-	bool (*write_thread)(struct console *con, struct nbcon_write_context *wctxt);
+	void (*write_thread)(struct console *con, struct nbcon_write_context *wctxt);
 
 	/**
-	 * @driver_enter:
+	 * @device_lock:
 	 *
 	 * NBCON callback to begin synchronization with driver code.
-	 * (Required for NBCON if write_thread is provided)
 	 *
 	 * Console drivers typically must deal with access to the hardware
 	 * via user input/output (such as an interactive login shell) and
 	 * output of kernel messages via printk() calls. This callback is
-	 * called before the kernel begins output via the write_thread()
-	 * callback due to printk() calls. The driver can use this
-	 * callback to acquire some driver lock in order to synchronize
-	 * against user input/output (or any other driver functionality).
+	 * called by the printk-subsystem whenever it needs to synchronize
+	 * with hardware access by the driver. It should be implemented to
+	 * use whatever synchronization mechanism the driver is using for
+	 * itself (for example, the port lock for uart serial consoles).
 	 *
 	 * This callback is always called from task context. It may use any
 	 * synchronization method required by the driver. BUT this callback
-	 * MUST disable migration. The console driver may be using a
-	 * sychronization mechanism that already takes care of this (such as
+	 * MUST also disable migration. The console driver may be using a
+	 * synchronization mechanism that already takes care of this (such as
 	 * spinlocks). Otherwise this function must explicitly call
 	 * migrate_disable().
 	 *
 	 * The flags argument is provided as a convenience to the driver. It
-	 * will be passed again to driver_exit() when printing is completed
-	 * (for example, if spin_lock_irqsave() was used). It can be ignored
-	 * if the driver does not need it.
+	 * will be passed again to device_unlock(). It can be ignored if the
+	 * driver does not need it.
 	 */
-	void (*driver_enter)(struct console *con, unsigned long *flags);
+	void (*device_lock)(struct console *con, unsigned long *flags);
 
 	/**
-	 * @driver_exit:
+	 * @device_unlock:
 	 *
 	 * NBCON callback to finish synchronization with driver code.
-	 * (Required for NBCON if write_thread is provided)
 	 *
-	 * This callback is called after the kernel has finished printing a
-	 * printk message. It is the counterpart to driver_enter().
+	 * It is the counterpart to device_lock().
 	 *
 	 * This callback is always called from task context. It must
-	 * appropriately re-enable migration (depending on how driver_enter()
+	 * appropriately re-enable migration (depending on how device_lock()
 	 * disabled migration).
 	 *
 	 * The flags argument is the value of the same variable that was
-	 * passed to driver_enter().
+	 * passed to device_lock().
 	 */
-	void (*driver_exit)(struct console *con, unsigned long flags);
+	void (*device_unlock)(struct console *con, unsigned long flags);
 
 	atomic_t		__private nbcon_state;
 	atomic_long_t		__private nbcon_seq;
+	atomic_long_t           __private nbcon_prev_seq;
+
+	/**
+	 * @nbcon_drvdata:
+	 *
+	 * Data for nbcon ownership tracking to allow acquiring nbcon consoles
+	 * in non-printing contexts.
+	 *
+	 * Drivers may need to acquire nbcon consoles in non-printing
+	 * contexts. This is achieved by providing a struct nbcon_drvdata.
+	 * Then the driver can call nbcon_driver_acquire() and
+	 * nbcon_driver_release(). The struct does not require any special
+	 * initialization.
+	 */
+	struct nbcon_drvdata	*nbcon_drvdata;
+
 	struct printk_buffers	*pbufs;
 	struct task_struct	*kthread;
 	struct rcuwait		rcuwait;
@@ -469,28 +495,29 @@ extern void console_list_unlock(void) __releases(console_mutex);
 extern struct hlist_head console_list;
 
 /**
- * console_srcu_read_flags - Locklessly read the console flags
+ * console_srcu_read_flags - Locklessly read flags of a possibly registered
+ *				console
  * @con:	struct console pointer of console to read flags from
  *
- * This function provides the necessary READ_ONCE() and data_race()
- * notation for locklessly reading the console flags. The READ_ONCE()
- * in this function matches the WRITE_ONCE() when @flags are modified
- * for registered consoles with console_srcu_write_flags().
+ * Locklessly reading @con->flags provides a consistent read value because
+ * there is at most one CPU modifying @con->flags and that CPU is using only
+ * read-modify-write operations to do so.
  *
- * Only use this function to read console flags when locklessly
- * iterating the console list via srcu.
+ * Requires console_srcu_read_lock to be held, which implies that @con might
+ * be a registered console. If the caller is holding the console_list_lock or
+ * it is certain that the console is not registered, the caller may read
+ * @con->flags directly instead.
  *
  * Context: Any context.
+ * Return: The current value of the @con->flags field.
  */
 static inline short console_srcu_read_flags(const struct console *con)
 {
 	WARN_ON_ONCE(!console_srcu_read_lock_is_held());
 
 	/*
-	 * Locklessly reading console->flags provides a consistent
-	 * read value because there is at most one CPU modifying
-	 * console->flags and that CPU is using only read-modify-write
-	 * operations to do so.
+	 * The READ_ONCE() matches the WRITE_ONCE() when @flags are modified
+	 * for registered consoles with console_srcu_write_flags().
 	 */
 	return data_race(READ_ONCE(con->flags));
 }

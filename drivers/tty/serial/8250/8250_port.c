@@ -551,8 +551,10 @@ static int serial8250_em485_init(struct uart_8250_port *p)
 		return -ENOMEM;
 
 #ifndef CONFIG_SERIAL_8250_LEGACY_CONSOLE
-	if (uart_console(&p->port))
+	if (uart_console(&p->port)) {
 		dev_warn(p->port.dev, "no atomic printing for rs485 consoles\n");
+		p->port.cons->write_atomic = NULL;
+	}
 #endif
 
 	hrtimer_init(&p->em485->stop_tx_timer, CLOCK_MONOTONIC,
@@ -3287,7 +3289,6 @@ void serial8250_init_port(struct uart_8250_port *up)
 	struct uart_port *port = &up->port;
 
 	spin_lock_init(&port->lock);
-	port->nbcon_locked_port = false;
 	port->ctrl_id = 0;
 	port->pm = NULL;
 	port->ops = &serial8250_pops;
@@ -3491,18 +3492,17 @@ void serial8250_console_write(struct uart_8250_port *up, const char *s,
 		uart_port_unlock_irqrestore(port, flags);
 }
 #else
-bool serial8250_console_write_thread(struct uart_8250_port *up,
+void serial8250_console_write_thread(struct uart_8250_port *up,
 				     struct nbcon_write_context *wctxt)
 {
 	struct uart_8250_em485 *em485 = up->em485;
 	struct uart_port *port = &up->port;
-	bool done = false;
 	unsigned int ier;
 
 	touch_nmi_watchdog();
 
 	if (!nbcon_enter_unsafe(wctxt))
-		return false;
+		return;
 
 	/* First save IER then disable the interrupts. */
 	ier = serial_port_in(port, UART_IER);
@@ -3548,7 +3548,6 @@ bool serial8250_console_write_thread(struct uart_8250_port *up,
 				break;
 			}
 		}
-		done = (i == len);
 	} else {
 		nbcon_reacquire(wctxt);
 	}
@@ -3574,24 +3573,23 @@ bool serial8250_console_write_thread(struct uart_8250_port *up,
 	if (up->msr_saved_flags)
 		serial8250_modem_status(up);
 
-	/* Success if no handover/takeover and message fully printed. */
-	return (nbcon_exit_unsafe(wctxt) && done);
+	nbcon_exit_unsafe(wctxt);
 }
 
-bool serial8250_console_write_atomic(struct uart_8250_port *up,
+void serial8250_console_write_atomic(struct uart_8250_port *up,
 				     struct nbcon_write_context *wctxt)
 {
 	struct uart_port *port = &up->port;
 	unsigned int ier;
 
 	/* Atomic console not supported for rs485 mode. */
-	if (up->em485)
-		return false;
+	if (WARN_ON_ONCE(up->em485))
+		return;
 
 	touch_nmi_watchdog();
 
 	if (!nbcon_enter_unsafe(wctxt))
-		return false;
+		return;
 
 	/*
 	 * First save IER then disable the interrupts. The special variant to
@@ -3615,8 +3613,7 @@ bool serial8250_console_write_atomic(struct uart_8250_port *up,
 	wait_for_xmitr(up, UART_LSR_BOTH_EMPTY);
 	serial_port_out(port, UART_IER, ier);
 
-	/* Success if no handover/takeover. */
-	return nbcon_exit_unsafe(wctxt);
+	nbcon_exit_unsafe(wctxt);
 }
 #endif /* CONFIG_SERIAL_8250_LEGACY_CONSOLE */
 

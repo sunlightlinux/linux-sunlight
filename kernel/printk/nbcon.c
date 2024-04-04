@@ -2,15 +2,26 @@
 // Copyright (C) 2022 Linutronix GmbH, John Ogness
 // Copyright (C) 2022 Intel, Thomas Gleixner
 
-#include <linux/kernel.h>
+#include <linux/atomic.h>
+#include <linux/bug.h>
 #include <linux/console.h>
 #include <linux/delay.h>
+#include <linux/errno.h>
+#include <linux/export.h>
+#include <linux/init.h>
+#include <linux/irqflags.h>
 #include <linux/kthread.h>
+#include <linux/minmax.h>
+#include <linux/percpu.h>
+#include <linux/preempt.h>
 #include <linux/slab.h>
-#include <linux/serial_core.h>
+#include <linux/smp.h>
+#include <linux/stddef.h>
+#include <linux/string.h>
 #include <linux/syscore_ops.h>
-#include "printk_ringbuffer.h"
+#include <linux/types.h>
 #include "internal.h"
+#include "printk_ringbuffer.h"
 /*
  * Printk console printing implementation for consoles which does not depend
  * on the legacy style console_lock mechanism.
@@ -176,9 +187,6 @@ void nbcon_seq_force(struct console *con, u64 seq)
 	u64 valid_seq = max_t(u64, seq, prb_first_valid_seq(prb));
 
 	atomic_long_set(&ACCESS_PRIVATE(con, nbcon_seq), __u64seq_to_ulseq(valid_seq));
-
-	/* Clear con->seq since nbcon consoles use con->nbcon_seq instead. */
-	con->seq = 0;
 }
 
 /**
@@ -890,7 +898,7 @@ static bool nbcon_emit_next_record(struct nbcon_write_context *wctxt, bool use_a
 	unsigned long con_dropped;
 	struct nbcon_state cur;
 	unsigned long dropped;
-	bool done = false;
+	unsigned long ulseq;
 
 	/*
 	 * The printk buffers are filled within an unsafe section. This
@@ -916,6 +924,28 @@ static bool nbcon_emit_next_record(struct nbcon_write_context *wctxt, bool use_a
 	if (dropped && !is_extended)
 		console_prepend_dropped(&pmsg, dropped);
 
+	/*
+	 * If the previous owner was assigned the same record, this context
+	 * has taken over ownership and is replaying the record. Prepend a
+	 * message to let the user know the record is replayed.
+	 */
+	ulseq = atomic_long_read(&ACCESS_PRIVATE(con, nbcon_prev_seq));
+	if (__ulseq_to_u64seq(prb, ulseq) == pmsg.seq) {
+		console_prepend_replay(&pmsg);
+	} else {
+		/*
+		 * Ensure this context is still the owner before trying to
+		 * update @nbcon_prev_seq. Otherwise the value in @ulseq may
+		 * not be from the previous owner.
+		 */
+		nbcon_state_read(con, &cur);
+		if (!nbcon_context_can_proceed(ctxt, &cur))
+			return false;
+
+		atomic_long_try_cmpxchg(&ACCESS_PRIVATE(con, nbcon_prev_seq), &ulseq,
+					__u64seq_to_ulseq(pmsg.seq));
+	}
+
 	if (!nbcon_context_exit_unsafe(ctxt))
 		return false;
 
@@ -931,18 +961,26 @@ static bool nbcon_emit_next_record(struct nbcon_write_context *wctxt, bool use_a
 
 	if (use_atomic &&
 	    con->write_atomic) {
-		done = con->write_atomic(con, wctxt);
+		con->write_atomic(con, wctxt);
 
 	} else if (!use_atomic &&
 		   con->write_thread) {
-		done = con->write_thread(con, wctxt);
+		con->write_thread(con, wctxt);
+
+	} else {
+		/*
+		 * This function should never be called for legacy consoles.
+		 * Handle it as if ownership was lost and try to continue.
+		 */
+		WARN_ON_ONCE(1);
+		nbcon_context_release(ctxt);
+		return false;
 	}
 
-	if (!done) {
+	if (!wctxt->outbuf) {
 		/*
-		 * The emit was aborted, probably due to a loss of ownership.
-		 * Ensure ownership was lost or released before reporting the
-		 * loss.
+		 * Ownership was lost and reacquired by the driver.
+		 * Handle it as if ownership was lost and try to continue.
 		 */
 		nbcon_context_release(ctxt);
 		return false;
@@ -987,7 +1025,7 @@ update_con:
  */
 static bool nbcon_kthread_should_wakeup(struct console *con, struct nbcon_context *ctxt)
 {
-	bool is_usable;
+	bool ret = false;
 	short flags;
 	int cookie;
 
@@ -995,17 +1033,17 @@ static bool nbcon_kthread_should_wakeup(struct console *con, struct nbcon_contex
 		return true;
 
 	cookie = console_srcu_read_lock();
+
 	flags = console_srcu_read_flags(con);
-	is_usable = console_is_usable(con, flags, false);
+	if (console_is_usable(con, flags, false)) {
+		/* Bring the sequence in @ctxt up to date */
+		ctxt->seq = nbcon_seq_read(con);
+
+		ret = prb_read_valid(prb, ctxt->seq, NULL);
+	}
+
 	console_srcu_read_unlock(cookie);
-
-	if (!is_usable)
-		return false;
-
-	/* Bring the sequence in @ctxt up to date */
-	ctxt->seq = nbcon_seq_read(con);
-
-	return prb_read_valid(prb, ctxt->seq, NULL);
+	return ret;
 }
 
 /**
@@ -1056,7 +1094,7 @@ wait_for_event:
 		con_flags = console_srcu_read_flags(con);
 
 		if (console_is_usable(con, con_flags, false)) {
-			con->driver_enter(con, &flags);
+			con->device_lock(con, &flags);
 
 			/*
 			 * Ensure this stays on the CPU to make handover and
@@ -1075,7 +1113,7 @@ wait_for_event:
 				}
 			}
 
-			con->driver_exit(con, flags);
+			con->device_unlock(con, flags);
 		}
 
 		console_srcu_read_unlock(cookie);
@@ -1166,12 +1204,11 @@ static __ref unsigned int *nbcon_get_cpu_emergency_nesting(void)
 /**
  * nbcon_emit_one - Print one record for an nbcon console using the
  *			specified callback
- * @wctxt:	An initialized write context struct to use
- *		for this context
+ * @wctxt:	An initialized write context struct to use for this context
  * @use_atomic:	True if the write_atomic callback is to be used
  *
- * Return:	False if the given console could not print a record or there
- *		are no more records to print, otherwise true.
+ * Return:	False if it is known there are no more records to print,
+ *		otherwise true.
  *
  * This is an internal helper to handle the locking of the console before
  * calling nbcon_emit_next_record().
@@ -1181,7 +1218,7 @@ static bool nbcon_emit_one(struct nbcon_write_context *wctxt, bool use_atomic)
 	struct nbcon_context *ctxt = &ACCESS_PRIVATE(wctxt, ctxt);
 
 	if (!nbcon_context_try_acquire(ctxt))
-		return false;
+		return true;
 
 	/*
 	 * nbcon_emit_next_record() returns false when the console was
@@ -1189,7 +1226,7 @@ static bool nbcon_emit_one(struct nbcon_write_context *wctxt, bool use_atomic)
 	 * longer valid.
 	 */
 	if (!nbcon_emit_next_record(wctxt, use_atomic))
-		return false;
+		return true;
 
 	nbcon_context_release(ctxt);
 
@@ -1229,8 +1266,9 @@ enum nbcon_prio nbcon_get_default_prio(void)
  * @cookie:	The cookie from the SRCU read lock.
  * @use_atomic:	True if the write_atomic callback is to be used
  *
- * Context:	Any context which could not be migrated to another CPU.
- * Return:	True if a record could be printed, otherwise false.
+ * Context:	Any context except NMI.
+ * Return:	False if the given console has no next record to print,
+ *		otherwise true.
  *
  * This function is meant to be called by console_flush_all() to print records
  * on nbcon consoles from legacy context (printing via console unlocking).
@@ -1241,8 +1279,8 @@ bool nbcon_legacy_emit_next_record(struct console *con, bool *handover,
 {
 	struct nbcon_write_context wctxt = { };
 	struct nbcon_context *ctxt = &ACCESS_PRIVATE(&wctxt, ctxt);
-	bool progress = false;
 	unsigned long flags;
+	bool progress;
 
 	*handover = false;
 
@@ -1261,34 +1299,78 @@ bool nbcon_legacy_emit_next_record(struct console *con, bool *handover,
 		*handover = console_lock_spinning_disable_and_check(cookie);
 		printk_safe_exit_irqrestore(flags);
 	} else {
-		con->driver_enter(con, &flags);
+		con->device_lock(con, &flags);
 		cant_migrate();
 
 		ctxt->prio = nbcon_get_default_prio();
 		progress = nbcon_emit_one(&wctxt, use_atomic);
 
-		con->driver_exit(con, flags);
+		con->device_unlock(con, flags);
 	}
 
 	return progress;
 }
 
 /**
- * __nbcon_atomic_flush_all - Flush all nbcon consoles using their
+ * __nbcon_atomic_flush_pending_con - Flush specified nbcon console using its
+ *					write_atomic() callback
+ * @con:			The nbcon console to flush
+ * @stop_seq:			Flush up until this record
+ * @allow_unsafe_takeover:	True, to allow unsafe hostile takeovers
+ *
+ * Return:	True if taken over while printing. Otherwise false.
+ *
+ * If flushing up to @stop_seq was not successful, it only makes sense for the
+ * caller to try again when true was returned. When false is returned, either
+ * there are no more records available to read or this context is not allowed
+ * to acquire the console.
+ */
+static bool __nbcon_atomic_flush_pending_con(struct console *con, u64 stop_seq,
+					     bool allow_unsafe_takeover)
+{
+	struct nbcon_write_context wctxt = { };
+	struct nbcon_context *ctxt = &ACCESS_PRIVATE(&wctxt, ctxt);
+
+	ctxt->console			= con;
+	ctxt->spinwait_max_us		= 2000;
+	ctxt->prio			= nbcon_get_default_prio();
+	ctxt->allow_unsafe_takeover	= allow_unsafe_takeover;
+
+	if (!nbcon_context_try_acquire(ctxt))
+		return false;
+
+	while (nbcon_seq_read(con) < stop_seq) {
+		/*
+		 * nbcon_emit_next_record() returns false when the console was
+		 * handed over or taken over. In both cases the context is no
+		 * longer valid.
+		 */
+		if (!nbcon_emit_next_record(&wctxt, true))
+			return true;
+
+		if (!ctxt->backlog)
+			break;
+	}
+
+	nbcon_context_release(ctxt);
+
+	return false;
+}
+
+/**
+ * __nbcon_atomic_flush_pending - Flush all nbcon consoles using their
  *					write_atomic() callback
  * @stop_seq:			Flush up until this record
  * @allow_unsafe_takeover:	True, to allow unsafe hostile takeovers
  */
-static void __nbcon_atomic_flush_all(u64 stop_seq, bool allow_unsafe_takeover)
+static void __nbcon_atomic_flush_pending(u64 stop_seq, bool allow_unsafe_takeover)
 {
-	struct nbcon_write_context wctxt = { };
-	struct nbcon_context *ctxt = &ACCESS_PRIVATE(&wctxt, ctxt);
 	struct console *con;
-	bool any_progress;
+	bool should_retry;
 	int cookie;
 
 	do {
-		any_progress = false;
+		should_retry = false;
 
 		cookie = console_srcu_read_lock();
 		for_each_console_srcu(con) {
@@ -1304,45 +1386,35 @@ static void __nbcon_atomic_flush_all(u64 stop_seq, bool allow_unsafe_takeover)
 			if (nbcon_seq_read(con) >= stop_seq)
 				continue;
 
-			memset(ctxt, 0, sizeof(*ctxt));
-			ctxt->console			= con;
-			ctxt->spinwait_max_us		= 2000;
-			ctxt->allow_unsafe_takeover	= allow_unsafe_takeover;
-
 			/*
 			 * Atomic flushing does not use console driver
 			 * synchronization (i.e. it does not hold the port
 			 * lock for uart consoles). Therefore IRQs must be
 			 * disabled to avoid being interrupted and then
 			 * calling into a driver that will deadlock trying
-			 * acquire console ownership.
-			 *
-			 * This also disables migration in order to get the
-			 * current CPU priority.
+			 * to acquire console ownership.
 			 */
 			local_irq_save(irq_flags);
 
-			ctxt->prio = nbcon_get_default_prio();
-
-			any_progress |= nbcon_emit_one(&wctxt, true);
-
+			should_retry |= __nbcon_atomic_flush_pending_con(con, stop_seq,
+									 allow_unsafe_takeover);
 			local_irq_restore(irq_flags);
 		}
 		console_srcu_read_unlock(cookie);
-	} while (any_progress);
+	} while (should_retry);
 }
 
 /**
- * nbcon_atomic_flush_all - Flush all nbcon consoles using their
+ * nbcon_atomic_flush_pending - Flush all nbcon consoles using their
  *				write_atomic() callback
  *
  * Flush the backlog up through the currently newest record. Any new
  * records added while flushing will not be flushed. This is to avoid
  * one CPU printing unbounded because other CPUs continue to add records.
  */
-void nbcon_atomic_flush_all(void)
+void nbcon_atomic_flush_pending(void)
 {
-	__nbcon_atomic_flush_all(prb_next_reserve_seq(prb), false);
+	__nbcon_atomic_flush_pending(prb_next_reserve_seq(prb), false);
 }
 
 /**
@@ -1354,7 +1426,7 @@ void nbcon_atomic_flush_all(void)
  */
 void nbcon_atomic_flush_unsafe(void)
 {
-	__nbcon_atomic_flush_all(prb_next_reserve_seq(prb), true);
+	__nbcon_atomic_flush_pending(prb_next_reserve_seq(prb), true);
 }
 
 /**
@@ -1397,8 +1469,10 @@ void nbcon_cpu_emergency_exit(void)
 
 	WARN_ON_ONCE(*cpu_emergency_nesting == 0);
 
-	if (*cpu_emergency_nesting == 1)
+	if (*cpu_emergency_nesting == 1) {
+		nbcon_atomic_flush_pending();
 		do_trigger_flush = true;
+	}
 
 	/* Undo the nesting count of nbcon_cpu_emergency_enter(). */
 	(*cpu_emergency_nesting)--;
@@ -1517,8 +1591,6 @@ bool nbcon_alloc(struct console *con)
  *
  * nbcon_alloc() *must* be called and succeed before this function
  * is called.
- *
- * This function expects that the legacy @con->seq has been set.
  */
 void nbcon_init(struct console *con)
 {
@@ -1529,7 +1601,8 @@ void nbcon_init(struct console *con)
 
 	rcuwait_init(&con->rcuwait);
 	init_irq_work(&con->irq_work, nbcon_irq_work);
-	nbcon_seq_force(con, con->seq);
+	nbcon_seq_force(con, 0);
+	atomic_long_set(&ACCESS_PRIVATE(con, nbcon_prev_seq), -1UL);
 	nbcon_state_set(con, &state);
 	nbcon_kthread_create(con);
 }
@@ -1552,87 +1625,54 @@ void nbcon_free(struct console *con)
 	con->pbufs = NULL;
 }
 
-static inline bool uart_is_nbcon(struct uart_port *up)
-{
-	int cookie;
-	bool ret;
-
-	if (!uart_console(up))
-		return false;
-
-	cookie = console_srcu_read_lock();
-	ret = (console_srcu_read_flags(up->cons) & CON_NBCON);
-	console_srcu_read_unlock(cookie);
-	return ret;
-}
-
 /**
- * uart_nbcon_acquire - The second half of the port locking wrapper
- * @up:		The uart port whose @lock was locked
+ * nbcon_driver_acquire - Acquire nbcon console and enter unsafe section
+ * @con:	The nbcon console to acquire
  *
- * The uart_port_lock() wrappers will first lock the spin_lock @up->lock.
- * Then this function is called to implement nbcon-specific processing.
+ * Context:	Any context which could not be migrated to another CPU.
  *
- * If @up is an nbcon console, this console will be acquired and marked as
- * unsafe. Otherwise this function does nothing.
+ * Console drivers will usually use their own internal synchronization
+ * mechasism to synchronize between console printing and non-printing
+ * activities (such as setting baud rates). However, nbcon console drivers
+ * supporting atomic consoles may also want to mark unsafe sections when
+ * performing non-printing activities.
  *
- * nbcon consoles acquired via the port lock wrapper always use priority
- * NBCON_PRIO_NORMAL.
+ * This function acquires the nbcon console using priority NBCON_PRIO_NORMAL
+ * and marks it unsafe for handover/takeover.
+ *
+ * Console drivers using this function must have provided @nbcon_drvdata in
+ * their struct console, which is used to track ownership and state
+ * information.
  */
-void uart_nbcon_acquire(struct uart_port *up)
+void nbcon_driver_acquire(struct console *con)
 {
-	struct console *con = up->cons;
-	struct nbcon_context ctxt;
+	struct nbcon_context *ctxt = &ACCESS_PRIVATE(con->nbcon_drvdata, ctxt);
 
-	if (!uart_is_nbcon(up))
-		return;
-
-	WARN_ON_ONCE(up->nbcon_locked_port);
+	cant_migrate();
 
 	do {
 		do {
-			memset(&ctxt, 0, sizeof(ctxt));
-			ctxt.console	= con;
-			ctxt.prio	= NBCON_PRIO_NORMAL;
-		} while (!nbcon_context_try_acquire(&ctxt));
+			memset(ctxt, 0, sizeof(*ctxt));
+			ctxt->console	= con;
+			ctxt->prio	= NBCON_PRIO_NORMAL;
+		} while (!nbcon_context_try_acquire(ctxt));
 
-	} while (!nbcon_context_enter_unsafe(&ctxt));
-
-	up->nbcon_locked_port = true;
+	} while (!nbcon_context_enter_unsafe(ctxt));
 }
-EXPORT_SYMBOL_GPL(uart_nbcon_acquire);
+EXPORT_SYMBOL_GPL(nbcon_driver_acquire);
 
 /**
- * uart_nbcon_release - The first half of the port unlocking wrapper
- * @up:		The uart port whose @lock is about to be unlocked
- *
- * The uart_port_unlock() wrappers will first call this function to implement
- * nbcon-specific processing. Then afterwards the uart_port_unlock() wrappers
- * will unlock the spin_lock @up->lock.
- *
- * If @up is an nbcon console, the console will be marked as safe and
- * released. Otherwise this function does nothing.
- *
- * nbcon consoles acquired via the port lock wrapper always use priority
- * NBCON_PRIO_NORMAL.
+ * nbcon_driver_release - Exit unsafe section and release the nbcon console
+ * @con:	The nbcon console acquired in nbcon_driver_acquire()
  */
-void uart_nbcon_release(struct uart_port *up)
+void nbcon_driver_release(struct console *con)
 {
-	struct console *con = up->cons;
-	struct nbcon_context ctxt = {
-		.console	= con,
-		.prio		= NBCON_PRIO_NORMAL,
-	};
+	struct nbcon_context *ctxt = &ACCESS_PRIVATE(con->nbcon_drvdata, ctxt);
 
-	if (!up->nbcon_locked_port)
-		return;
-
-	if (nbcon_context_exit_unsafe(&ctxt))
-		nbcon_context_release(&ctxt);
-
-	up->nbcon_locked_port = false;
+	if (nbcon_context_exit_unsafe(ctxt))
+		nbcon_context_release(ctxt);
 }
-EXPORT_SYMBOL_GPL(uart_nbcon_release);
+EXPORT_SYMBOL_GPL(nbcon_driver_release);
 
 /**
  * printk_kthread_shutdown - shutdown all threaded printers
