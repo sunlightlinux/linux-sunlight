@@ -1282,11 +1282,11 @@ static const struct dpll_info hsw_plls[] = {
 	{ .name = "WRPLL 2", .funcs = &hsw_ddi_wrpll_funcs, .id = DPLL_ID_WRPLL2, },
 	{ .name = "SPLL", .funcs = &hsw_ddi_spll_funcs, .id = DPLL_ID_SPLL, },
 	{ .name = "LCPLL 810", .funcs = &hsw_ddi_lcpll_funcs, .id = DPLL_ID_LCPLL_810,
-	  .always_on = true, },
+	  .flags = INTEL_DPLL_ALWAYS_ON, },
 	{ .name = "LCPLL 1350", .funcs = &hsw_ddi_lcpll_funcs, .id = DPLL_ID_LCPLL_1350,
-	  .always_on = true, },
+	  .flags = INTEL_DPLL_ALWAYS_ON, },
 	{ .name = "LCPLL 2700", .funcs = &hsw_ddi_lcpll_funcs, .id = DPLL_ID_LCPLL_2700,
-	  .always_on = true, },
+	  .flags = INTEL_DPLL_ALWAYS_ON, },
 	{}
 };
 
@@ -1973,7 +1973,7 @@ static const struct intel_shared_dpll_funcs skl_ddi_dpll0_funcs = {
 
 static const struct dpll_info skl_plls[] = {
 	{ .name = "DPLL 0", .funcs = &skl_ddi_dpll0_funcs, .id = DPLL_ID_SKL_DPLL0,
-	  .always_on = true, },
+	  .flags = INTEL_DPLL_ALWAYS_ON, },
 	{ .name = "DPLL 1", .funcs = &skl_ddi_pll_funcs, .id = DPLL_ID_SKL_DPLL1, },
 	{ .name = "DPLL 2", .funcs = &skl_ddi_pll_funcs, .id = DPLL_ID_SKL_DPLL2, },
 	{ .name = "DPLL 3", .funcs = &skl_ddi_pll_funcs, .id = DPLL_ID_SKL_DPLL3, },
@@ -4569,7 +4569,7 @@ verify_single_dpll_state(struct drm_i915_private *i915,
 
 	active = intel_dpll_get_hw_state(i915, pll, &dpll_hw_state);
 
-	if (!pll->info->always_on) {
+	if (!(pll->info->flags & INTEL_DPLL_ALWAYS_ON)) {
 		I915_STATE_WARN(i915, !pll->on && pll->active_mask,
 				"%s: pll in active use but not on in sw tracking\n",
 				pll->info->name);
