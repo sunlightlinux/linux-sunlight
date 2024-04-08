@@ -2620,7 +2620,8 @@ static struct worker *create_worker(struct worker_pool *pool)
 	 * check if not woken up soon. As kick_pool() is noop if @pool is empty,
 	 * wake it up explicitly.
 	 */
-	wake_up_process(worker->task);
+	if (worker->task)
+		wake_up_process(worker->task);
 
 	raw_spin_unlock_irq(&pool->lock);
 
@@ -2660,7 +2661,8 @@ static void wake_dying_workers(struct list_head *cull_list)
 		 * below will be observed by the worker and is safe to do
 		 * outside of pool->lock.
 		 */
-		wake_up_process(worker->task);
+		if (worker->task)
+			wake_up_process(worker->task);
 	}
 }
 
@@ -3053,7 +3055,8 @@ __acquires(&pool->lock)
 	 * stop_machine. At the same time, report a quiescent RCU state so
 	 * the same condition doesn't freeze RCU.
 	 */
-	cond_resched();
+	if (worker->task)
+		cond_resched();
 
 	raw_spin_lock_irq(&pool->lock);
 
