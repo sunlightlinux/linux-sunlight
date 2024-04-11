@@ -2454,7 +2454,7 @@ int i915_gem_context_getparam_ioctl(struct drm_device *dev, void *data,
 	case I915_CONTEXT_PARAM_GTT_SIZE:
 		args->size = 0;
 		vm = i915_gem_context_get_eb_vm(ctx);
-		args->value = vm->total + vm->rsvd.vma->node.size;
+		args->value = vm->total;
 		i915_vm_put(vm);
 
 		break;
