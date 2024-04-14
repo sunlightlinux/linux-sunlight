@@ -1504,9 +1504,7 @@ static int vc4_prepare_fb(struct drm_plane *plane,
 
 	bo = to_vc4_bo(&drm_fb_dma_get_gem_obj(state->fb, 0)->base);
 
-	ret = drm_gem_plane_helper_prepare_fb(plane, state);
-	if (ret)
-		return ret;
+	drm_gem_plane_helper_prepare_fb(plane, state);
 
 	return vc4_bo_inc_usecnt(bo);
 }
