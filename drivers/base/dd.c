@@ -592,7 +592,7 @@ static int call_driver_probe(struct device *dev, const struct device_driver *drv
 		break;
 	default:
 		/* driver matched but the probe failed */
-		dev_err(dev, "probe with driver %s failed with error %d\n",
+		dev_warn(dev, "probe with driver %s failed with error %d\n",
 			drv->name, ret);
 		break;
 	}
