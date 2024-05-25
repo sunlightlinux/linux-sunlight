@@ -93,6 +93,7 @@ config INTEL_MEI_VIRTIO
 	  The module will be called mei_virtio.
 	  Enable this if your virtual machine supports virtual mei
 	  device over virtio.
+source "drivers/misc/mei/iaf/Kconfig"
 
 source "drivers/misc/mei/hdcp/Kconfig"
 source "drivers/misc/mei/pxp/Kconfig"
