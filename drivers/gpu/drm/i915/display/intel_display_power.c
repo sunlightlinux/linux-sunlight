@@ -640,13 +640,7 @@ release_async_put_domains(struct i915_power_domains *power_domains,
 	enum intel_display_power_domain domain;
 	intel_wakeref_t wakeref;
 
-	/*
-	 * The caller must hold already raw wakeref, upgrade that to a proper
-	 * wakeref to make the state checker happy about the HW access during
-	 * power well disabling.
-	 */
-	assert_rpm_raw_wakeref_held(rpm);
-	wakeref = intel_runtime_pm_get(rpm);
+	wakeref = intel_runtime_pm_get_noresume(rpm);
 
 	for_each_power_domain(domain, mask) {
 		/* Clear before put, so put's sanity check is happy. */
@@ -1693,6 +1687,10 @@ static void icl_display_core_init(struct drm_i915_private *dev_priv,
 	/* 8. Ensure PHYs have completed calibration and adaptation */
 	if (IS_DG2(dev_priv))
 		intel_snps_phy_wait_for_calibration(dev_priv);
+
+	/* 9. XE2_HPD: Program CHICKEN_MISC_2 before any cursor or planes are enabled */
+	if (DISPLAY_VER_FULL(dev_priv) == IP_VER(14, 1))
+		intel_de_rmw(dev_priv, CHICKEN_MISC_2, BMG_DARB_HALF_BLK_END_BURST, 1);
 
 	if (resume)
 		intel_dmc_load_program(dev_priv);

@@ -281,6 +281,10 @@ struct xe_device {
 		u8 has_heci_gscfi:1;
 		/** @info.skip_guc_pc: Skip GuC based PM feature init */
 		u8 skip_guc_pc:1;
+		/** @info.has_atomic_enable_pte_bit: Device has atomic enable PTE bit */
+		u8 has_atomic_enable_pte_bit:1;
+		/** @info.has_device_atomics_on_smem: Supports device atomics on SMEM */
+		u8 has_device_atomics_on_smem:1;
 
 #if IS_ENABLED(CONFIG_DRM_XE_DISPLAY)
 		struct {
@@ -321,6 +325,10 @@ struct xe_device {
 	struct {
 		/** @sriov.__mode: SR-IOV mode (Don't access directly!) */
 		enum xe_sriov_mode __mode;
+
+		/** @sriov.pf: PF specific data */
+		struct xe_device_pf pf;
+
 		/** @sriov.wq: workqueue used by the virtualization workers */
 		struct workqueue_struct *wq;
 	} sriov;
@@ -380,9 +388,6 @@ struct xe_device {
 	 * triggering additional actions when they occur.
 	 */
 	struct {
-		/** @mem_access.ref: ref count of memory accesses */
-		atomic_t ref;
-
 		/**
 		 * @mem_access.vram_userfault: Encapsulate vram_userfault
 		 * related stuff
@@ -426,9 +431,6 @@ struct xe_device {
 		/** @d3cold.allowed: Indicates if d3cold is a valid device state */
 		bool allowed;
 
-		/** @d3cold.power_lost: Indicates if card has really lost power. */
-		bool power_lost;
-
 		/**
 		 * @d3cold.vram_threshold:
 		 *
@@ -458,6 +460,14 @@ struct xe_device {
 	/** @needs_flr_on_fini: requests function-reset on fini */
 	bool needs_flr_on_fini;
 
+	/** @wedged: Struct to control Wedged States and mode */
+	struct {
+		/** @wedged.flag: Xe device faced a critical error and is now blocked. */
+		atomic_t flag;
+		/** @wedged.mode: Mode controlled by kernel parameter and debugfs */
+		int mode;
+	} wedged;
+
 	/* private: */
 
 #if IS_ENABLED(CONFIG_DRM_XE_DISPLAY)
@@ -483,6 +493,7 @@ struct xe_device {
 			INTEL_DRAM_LPDDR4,
 			INTEL_DRAM_DDR5,
 			INTEL_DRAM_LPDDR5,
+			INTEL_DRAM_GDDR,
 		} type;
 		u8 num_qgv_points;
 		u8 num_psf_gv_points;
@@ -497,24 +508,8 @@ struct xe_device {
 	/* To shut up runtime pm macros.. */
 	struct xe_runtime_pm {} runtime_pm;
 
-	/* For pcode */
-	struct mutex sb_lock;
-
-	/* Should be in struct intel_display */
-	u32 skl_preferred_vco_freq, max_dotclk_freq, hti_state;
-	u8 snps_phy_failed_calibration;
-	struct drm_atomic_state *modeset_restore_state;
-	struct list_head global_obj_list;
-
-	union {
-		/* only to allow build, not used functionally */
-		u32 irq_mask;
-		u32 de_irq_mask[I915_MAX_PIPES];
-	};
-	u32 pipestat_irq_mask[I915_MAX_PIPES];
-
-	bool display_irqs_enabled;
-	u32 enabled_irq_mask;
+	/* only to allow build, not used functionally */
+	u32 irq_mask;
 
 	struct intel_uncore {
 		spinlock_t lock;
@@ -525,11 +520,7 @@ struct xe_device {
 		unsigned int hpll_freq;
 		unsigned int czclk_freq;
 		unsigned int fsb_freq, mem_freq, is_ddr3;
-		u8 vblank_enabled;
 	};
-	struct {
-		const char *dmc_firmware_path;
-	} params;
 
 	void *pxp;
 #endif
@@ -560,6 +551,9 @@ struct xe_file {
 		/** @exec_queue.lock: protects file engine state */
 		struct mutex lock;
 	} exec_queue;
+
+	/** @runtime: hw engine class runtime in ticks for this drm client */
+	u64 runtime[XE_ENGINE_CLASS_MAX];
 
 	/** @client: drm client */
 	struct xe_drm_client *client;

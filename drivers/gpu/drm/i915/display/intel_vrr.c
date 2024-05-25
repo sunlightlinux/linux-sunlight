@@ -9,6 +9,7 @@
 #include "intel_de.h"
 #include "intel_display_types.h"
 #include "intel_vrr.h"
+#include "intel_dp.h"
 
 bool intel_vrr_is_capable(struct intel_connector *connector)
 {
@@ -113,6 +114,7 @@ intel_vrr_compute_config(struct intel_crtc_state *crtc_state,
 	struct drm_i915_private *i915 = to_i915(crtc->base.dev);
 	struct intel_connector *connector =
 		to_intel_connector(conn_state->connector);
+	struct intel_dp *intel_dp = intel_attached_dp(connector);
 	struct drm_display_mode *adjusted_mode = &crtc_state->hw.adjusted_mode;
 	const struct drm_display_info *info = &connector->base.display_info;
 	int vmin, vmax;
@@ -172,6 +174,14 @@ intel_vrr_compute_config(struct intel_crtc_state *crtc_state,
 	if (crtc_state->uapi.vrr_enabled) {
 		crtc_state->vrr.enable = true;
 		crtc_state->mode_flags |= I915_MODE_FLAG_VRR;
+		if (intel_dp_as_sdp_supported(intel_dp)) {
+			crtc_state->vrr.vsync_start =
+				(crtc_state->hw.adjusted_mode.crtc_vtotal -
+					crtc_state->hw.adjusted_mode.vsync_start);
+			crtc_state->vrr.vsync_end =
+				(crtc_state->hw.adjusted_mode.crtc_vtotal -
+					crtc_state->hw.adjusted_mode.vsync_end);
+		}
 	}
 }
 
@@ -203,14 +213,19 @@ void intel_vrr_set_transcoder_timings(const struct intel_crtc_state *crtc_state)
 			     0, PIPE_VBLANK_WITH_DELAY);
 
 	if (!crtc_state->vrr.flipline) {
-		intel_de_write(dev_priv, TRANS_VRR_CTL(cpu_transcoder), 0);
+		intel_de_write(dev_priv,
+			       TRANS_VRR_CTL(dev_priv, cpu_transcoder), 0);
 		return;
 	}
 
-	intel_de_write(dev_priv, TRANS_VRR_VMIN(cpu_transcoder), crtc_state->vrr.vmin - 1);
-	intel_de_write(dev_priv, TRANS_VRR_VMAX(cpu_transcoder), crtc_state->vrr.vmax - 1);
-	intel_de_write(dev_priv, TRANS_VRR_CTL(cpu_transcoder), trans_vrr_ctl(crtc_state));
-	intel_de_write(dev_priv, TRANS_VRR_FLIPLINE(cpu_transcoder), crtc_state->vrr.flipline - 1);
+	intel_de_write(dev_priv, TRANS_VRR_VMIN(dev_priv, cpu_transcoder),
+		       crtc_state->vrr.vmin - 1);
+	intel_de_write(dev_priv, TRANS_VRR_VMAX(dev_priv, cpu_transcoder),
+		       crtc_state->vrr.vmax - 1);
+	intel_de_write(dev_priv, TRANS_VRR_CTL(dev_priv, cpu_transcoder),
+		       trans_vrr_ctl(crtc_state));
+	intel_de_write(dev_priv, TRANS_VRR_FLIPLINE(dev_priv, cpu_transcoder),
+		       crtc_state->vrr.flipline - 1);
 }
 
 void intel_vrr_send_push(const struct intel_crtc_state *crtc_state)
@@ -222,7 +237,7 @@ void intel_vrr_send_push(const struct intel_crtc_state *crtc_state)
 	if (!crtc_state->vrr.enable)
 		return;
 
-	intel_de_write(dev_priv, TRANS_PUSH(cpu_transcoder),
+	intel_de_write(dev_priv, TRANS_PUSH(dev_priv, cpu_transcoder),
 		       TRANS_PUSH_EN | TRANS_PUSH_SEND);
 }
 
@@ -235,7 +250,7 @@ bool intel_vrr_is_push_sent(const struct intel_crtc_state *crtc_state)
 	if (!crtc_state->vrr.enable)
 		return false;
 
-	return intel_de_read(dev_priv, TRANS_PUSH(cpu_transcoder)) & TRANS_PUSH_SEND;
+	return intel_de_read(dev_priv, TRANS_PUSH(dev_priv, cpu_transcoder)) & TRANS_PUSH_SEND;
 }
 
 void intel_vrr_enable(const struct intel_crtc_state *crtc_state)
@@ -246,8 +261,16 @@ void intel_vrr_enable(const struct intel_crtc_state *crtc_state)
 	if (!crtc_state->vrr.enable)
 		return;
 
-	intel_de_write(dev_priv, TRANS_PUSH(cpu_transcoder), TRANS_PUSH_EN);
-	intel_de_write(dev_priv, TRANS_VRR_CTL(cpu_transcoder),
+	intel_de_write(dev_priv, TRANS_PUSH(dev_priv, cpu_transcoder),
+		       TRANS_PUSH_EN);
+
+	if (HAS_AS_SDP(dev_priv))
+		intel_de_write(dev_priv,
+			       TRANS_VRR_VSYNC(dev_priv, cpu_transcoder),
+			       VRR_VSYNC_END(crtc_state->vrr.vsync_end) |
+			       VRR_VSYNC_START(crtc_state->vrr.vsync_start));
+
+	intel_de_write(dev_priv, TRANS_VRR_CTL(dev_priv, cpu_transcoder),
 		       VRR_CTL_VRR_ENABLE | trans_vrr_ctl(crtc_state));
 }
 
@@ -260,20 +283,26 @@ void intel_vrr_disable(const struct intel_crtc_state *old_crtc_state)
 	if (!old_crtc_state->vrr.enable)
 		return;
 
-	intel_de_write(dev_priv, TRANS_VRR_CTL(cpu_transcoder),
+	intel_de_write(dev_priv, TRANS_VRR_CTL(dev_priv, cpu_transcoder),
 		       trans_vrr_ctl(old_crtc_state));
-	intel_de_wait_for_clear(dev_priv, TRANS_VRR_STATUS(cpu_transcoder),
+	intel_de_wait_for_clear(dev_priv,
+				TRANS_VRR_STATUS(dev_priv, cpu_transcoder),
 				VRR_STATUS_VRR_EN_LIVE, 1000);
-	intel_de_write(dev_priv, TRANS_PUSH(cpu_transcoder), 0);
+	intel_de_write(dev_priv, TRANS_PUSH(dev_priv, cpu_transcoder), 0);
+
+	if (HAS_AS_SDP(dev_priv))
+		intel_de_write(dev_priv,
+			       TRANS_VRR_VSYNC(dev_priv, cpu_transcoder), 0);
 }
 
 void intel_vrr_get_config(struct intel_crtc_state *crtc_state)
 {
 	struct drm_i915_private *dev_priv = to_i915(crtc_state->uapi.crtc->dev);
 	enum transcoder cpu_transcoder = crtc_state->cpu_transcoder;
-	u32 trans_vrr_ctl;
+	u32 trans_vrr_ctl, trans_vrr_vsync;
 
-	trans_vrr_ctl = intel_de_read(dev_priv, TRANS_VRR_CTL(cpu_transcoder));
+	trans_vrr_ctl = intel_de_read(dev_priv,
+				      TRANS_VRR_CTL(dev_priv, cpu_transcoder));
 
 	crtc_state->vrr.enable = trans_vrr_ctl & VRR_CTL_VRR_ENABLE;
 
@@ -286,11 +315,25 @@ void intel_vrr_get_config(struct intel_crtc_state *crtc_state)
 				REG_FIELD_GET(VRR_CTL_PIPELINE_FULL_MASK, trans_vrr_ctl);
 
 	if (trans_vrr_ctl & VRR_CTL_FLIP_LINE_EN) {
-		crtc_state->vrr.flipline = intel_de_read(dev_priv, TRANS_VRR_FLIPLINE(cpu_transcoder)) + 1;
-		crtc_state->vrr.vmax = intel_de_read(dev_priv, TRANS_VRR_VMAX(cpu_transcoder)) + 1;
-		crtc_state->vrr.vmin = intel_de_read(dev_priv, TRANS_VRR_VMIN(cpu_transcoder)) + 1;
+		crtc_state->vrr.flipline = intel_de_read(dev_priv,
+							 TRANS_VRR_FLIPLINE(dev_priv, cpu_transcoder)) + 1;
+		crtc_state->vrr.vmax = intel_de_read(dev_priv,
+						     TRANS_VRR_VMAX(dev_priv, cpu_transcoder)) + 1;
+		crtc_state->vrr.vmin = intel_de_read(dev_priv,
+						     TRANS_VRR_VMIN(dev_priv, cpu_transcoder)) + 1;
 	}
 
-	if (crtc_state->vrr.enable)
+	if (crtc_state->vrr.enable) {
 		crtc_state->mode_flags |= I915_MODE_FLAG_VRR;
+
+		if (HAS_AS_SDP(dev_priv)) {
+			trans_vrr_vsync =
+				intel_de_read(dev_priv,
+					      TRANS_VRR_VSYNC(dev_priv, cpu_transcoder));
+			crtc_state->vrr.vsync_start =
+				REG_FIELD_GET(VRR_VSYNC_START_MASK, trans_vrr_vsync);
+			crtc_state->vrr.vsync_end =
+				REG_FIELD_GET(VRR_VSYNC_END_MASK, trans_vrr_vsync);
+		}
+	}
 }

@@ -640,6 +640,10 @@ static int xelpdp_get_dram_info(struct drm_i915_private *i915)
 	case 5:
 		dram_info->type = INTEL_DRAM_LPDDR3;
 		break;
+	case 8:
+		drm_WARN_ON(&i915->drm, !IS_DGFX(i915));
+		dram_info->type = INTEL_DRAM_GDDR;
+		break;
 	default:
 		MISSING_CASE(val);
 		return -EINVAL;
@@ -680,6 +684,8 @@ void intel_dram_detect(struct drm_i915_private *i915)
 		ret = skl_get_dram_info(i915);
 	if (ret)
 		return;
+
+	drm_dbg_kms(&i915->drm, "Num qgv points %u\n", dram_info->num_qgv_points);
 
 	drm_dbg_kms(&i915->drm, "DRAM channels: %u\n", dram_info->num_channels);
 

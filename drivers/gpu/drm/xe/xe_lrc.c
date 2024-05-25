@@ -5,10 +5,12 @@
 
 #include "xe_lrc.h"
 
+#include <linux/ascii85.h>
+
 #include "instructions/xe_mi_commands.h"
 #include "instructions/xe_gfxpipe_commands.h"
+#include "instructions/xe_gfx_state_commands.h"
 #include "regs/xe_engine_regs.h"
-#include "regs/xe_gpu_commands.h"
 #include "regs/xe_lrc_layout.h"
 #include "xe_bb.h"
 #include "xe_bo.h"
@@ -23,13 +25,31 @@
 #include "xe_sriov.h"
 #include "xe_vm.h"
 
-#define LRC_VALID				(1 << 0)
-#define LRC_PRIVILEGE				(1 << 8)
-#define LRC_ADDRESSING_MODE_SHIFT		3
+#define LRC_VALID				BIT_ULL(0)
+#define LRC_PRIVILEGE				BIT_ULL(8)
+#define LRC_ADDRESSING_MODE			GENMASK_ULL(4, 3)
 #define LRC_LEGACY_64B_CONTEXT			3
 
-#define ENGINE_CLASS_SHIFT			61
-#define ENGINE_INSTANCE_SHIFT			48
+#define LRC_ENGINE_CLASS			GENMASK_ULL(63, 61)
+#define LRC_ENGINE_INSTANCE			GENMASK_ULL(53, 48)
+
+#define LRC_INDIRECT_RING_STATE_SIZE		SZ_4K
+
+struct xe_lrc_snapshot {
+	struct xe_bo *lrc_bo;
+	void *lrc_snapshot;
+	unsigned long lrc_size, lrc_offset;
+
+	u32 context_desc;
+	u32 indirect_context_desc;
+	u32 head;
+	struct {
+		u32 internal;
+		u32 memory;
+	} tail;
+	u32 start_seqno;
+	u32 seqno;
+};
 
 static struct xe_device *
 lrc_to_xe(struct xe_lrc *lrc)
@@ -37,20 +57,25 @@ lrc_to_xe(struct xe_lrc *lrc)
 	return gt_to_xe(lrc->fence_ctx.gt);
 }
 
-size_t xe_lrc_size(struct xe_device *xe, enum xe_engine_class class)
+size_t xe_gt_lrc_size(struct xe_gt *gt, enum xe_engine_class class)
 {
+	struct xe_device *xe = gt_to_xe(gt);
+	size_t size;
+
 	switch (class) {
 	case XE_ENGINE_CLASS_RENDER:
 		if (GRAPHICS_VER(xe) >= 20)
-			return 4 * SZ_4K;
+			size = 4 * SZ_4K;
 		else
-			return 14 * SZ_4K;
+			size = 14 * SZ_4K;
+		break;
 	case XE_ENGINE_CLASS_COMPUTE:
 		/* 14 pages since graphics_ver == 11 */
 		if (GRAPHICS_VER(xe) >= 20)
-			return 3 * SZ_4K;
+			size = 3 * SZ_4K;
 		else
-			return 14 * SZ_4K;
+			size = 14 * SZ_4K;
+		break;
 	default:
 		WARN(1, "Unknown engine class: %d", class);
 		fallthrough;
@@ -58,8 +83,14 @@ size_t xe_lrc_size(struct xe_device *xe, enum xe_engine_class class)
 	case XE_ENGINE_CLASS_VIDEO_DECODE:
 	case XE_ENGINE_CLASS_VIDEO_ENHANCE:
 	case XE_ENGINE_CLASS_OTHER:
-		return 2 * SZ_4K;
+		size = 2 * SZ_4K;
 	}
+
+	/* Add indirect ring state page */
+	if (xe_gt_has_indirect_ring_state(gt))
+		size += LRC_INDIRECT_RING_STATE_SIZE;
+
+	return size;
 }
 
 /*
@@ -490,6 +521,32 @@ static const u8 xe2_xcs_offsets[] = {
 	0
 };
 
+static const u8 xe2_indirect_ring_state_offsets[] = {
+	NOP(1),                 /* [0x00] */
+	LRI(5, POSTED),         /* [0x01] */
+	REG(0x034),             /* [0x02] RING_BUFFER_HEAD */
+	REG(0x030),             /* [0x04] RING_BUFFER_TAIL */
+	REG(0x038),             /* [0x06] RING_BUFFER_START */
+	REG(0x048),             /* [0x08] RING_BUFFER_START_UDW */
+	REG(0x03c),             /* [0x0a] RING_BUFFER_CONTROL */
+
+	NOP(5),                 /* [0x0c] */
+	LRI(9, POSTED),         /* [0x11] */
+	REG(0x168),             /* [0x12] BB_ADDR_UDW */
+	REG(0x140),             /* [0x14] BB_ADDR */
+	REG(0x110),             /* [0x16] BB_STATE */
+	REG16(0x588),           /* [0x18] BB_STACK_WRITE_PORT */
+	REG16(0x588),           /* [0x20] BB_STACK_WRITE_PORT */
+	REG16(0x588),           /* [0x22] BB_STACK_WRITE_PORT */
+	REG16(0x588),           /* [0x24] BB_STACK_WRITE_PORT */
+	REG16(0x588),           /* [0x26] BB_STACK_WRITE_PORT */
+	REG16(0x588),           /* [0x28] BB_STACK_WRITE_PORT */
+
+	NOP(12),                 /* [0x00] */
+
+	0
+};
+
 #undef REG16
 #undef REG
 #undef LRI
@@ -527,6 +584,10 @@ static void set_context_control(u32 *regs, struct xe_hw_engine *hwe)
 {
 	regs[CTX_CONTEXT_CONTROL] = _MASKED_BIT_ENABLE(CTX_CTRL_INHIBIT_SYN_CTX_SWITCH |
 						       CTX_CTRL_ENGINE_CTX_RESTORE_INHIBIT);
+
+	if (xe_gt_has_indirect_ring_state(hwe->gt))
+		regs[CTX_CONTEXT_CONTROL] |=
+			_MASKED_BIT_ENABLE(CTX_CTRL_INDIRECT_RING_STATE_ENABLE);
 
 	/* TODO: Timestamp */
 }
@@ -569,6 +630,11 @@ static void reset_stop_ring(u32 *regs, struct xe_hw_engine *hwe)
 	x = lrc_ring_mi_mode(hwe);
 	regs[x + 1] &= ~STOP_RING;
 	regs[x + 1] |= STOP_RING << 16;
+}
+
+static inline bool xe_lrc_has_indirect_ring_state(struct xe_lrc *lrc)
+{
+	return lrc->flags & XE_LRC_FLAG_INDIRECT_RING_STATE;
 }
 
 static inline u32 __xe_lrc_ring_offset(struct xe_lrc *lrc)
@@ -625,6 +691,12 @@ static inline u32 __xe_lrc_regs_offset(struct xe_lrc *lrc)
 	return xe_lrc_pphwsp_offset(lrc) + LRC_PPHWSP_SIZE;
 }
 
+static inline u32 __xe_lrc_indirect_ring_offset(struct xe_lrc *lrc)
+{
+	/* Indirect ring state page is at the very end of LRC */
+	return lrc->size - LRC_INDIRECT_RING_STATE_SIZE;
+}
+
 #define DECL_MAP_ADDR_HELPERS(elem) \
 static inline struct iosys_map __xe_lrc_##elem##_map(struct xe_lrc *lrc) \
 { \
@@ -634,7 +706,7 @@ static inline struct iosys_map __xe_lrc_##elem##_map(struct xe_lrc *lrc) \
 	iosys_map_incr(&map, __xe_lrc_##elem##_offset(lrc)); \
 	return map; \
 } \
-static inline u32 __xe_lrc_##elem##_ggtt_addr(struct xe_lrc *lrc) \
+static inline u32 __maybe_unused __xe_lrc_##elem##_ggtt_addr(struct xe_lrc *lrc) \
 { \
 	return xe_bo_ggtt_addr(lrc->bo) + __xe_lrc_##elem##_offset(lrc); \
 } \
@@ -645,12 +717,42 @@ DECL_MAP_ADDR_HELPERS(seqno)
 DECL_MAP_ADDR_HELPERS(regs)
 DECL_MAP_ADDR_HELPERS(start_seqno)
 DECL_MAP_ADDR_HELPERS(parallel)
+DECL_MAP_ADDR_HELPERS(indirect_ring)
 
 #undef DECL_MAP_ADDR_HELPERS
 
 u32 xe_lrc_ggtt_addr(struct xe_lrc *lrc)
 {
 	return __xe_lrc_pphwsp_ggtt_addr(lrc);
+}
+
+u32 xe_lrc_indirect_ring_ggtt_addr(struct xe_lrc *lrc)
+{
+	if (!xe_lrc_has_indirect_ring_state(lrc))
+		return 0;
+
+	return __xe_lrc_indirect_ring_ggtt_addr(lrc);
+}
+
+static u32 xe_lrc_read_indirect_ctx_reg(struct xe_lrc *lrc, int reg_nr)
+{
+	struct xe_device *xe = lrc_to_xe(lrc);
+	struct iosys_map map;
+
+	map = __xe_lrc_indirect_ring_map(lrc);
+	iosys_map_incr(&map, reg_nr * sizeof(u32));
+	return xe_map_read32(xe, &map);
+}
+
+static void xe_lrc_write_indirect_ctx_reg(struct xe_lrc *lrc,
+					  int reg_nr, u32 val)
+{
+	struct xe_device *xe = lrc_to_xe(lrc);
+	struct iosys_map map;
+
+	map = __xe_lrc_indirect_ring_map(lrc);
+	iosys_map_incr(&map, reg_nr * sizeof(u32));
+	xe_map_write32(xe, &map, val);
 }
 
 u32 xe_lrc_read_ctx_reg(struct xe_lrc *lrc, int reg_nr)
@@ -675,20 +777,25 @@ void xe_lrc_write_ctx_reg(struct xe_lrc *lrc, int reg_nr, u32 val)
 
 static void *empty_lrc_data(struct xe_hw_engine *hwe)
 {
-	struct xe_device *xe = gt_to_xe(hwe->gt);
+	struct xe_gt *gt = hwe->gt;
 	void *data;
 	u32 *regs;
 
-	data = kzalloc(xe_lrc_size(xe, hwe->class), GFP_KERNEL);
+	data = kzalloc(xe_gt_lrc_size(gt, hwe->class), GFP_KERNEL);
 	if (!data)
 		return NULL;
 
 	/* 1st page: Per-Process of HW status Page */
 	regs = data + LRC_PPHWSP_SIZE;
-	set_offsets(regs, reg_offsets(xe, hwe->class), hwe);
+	set_offsets(regs, reg_offsets(gt_to_xe(gt), hwe->class), hwe);
 	set_context_control(regs, hwe);
 	set_memory_based_intr(regs, hwe);
 	reset_stop_ring(regs, hwe);
+	if (xe_gt_has_indirect_ring_state(gt)) {
+		regs = data + xe_gt_lrc_size(gt, hwe->class) -
+		       LRC_INDIRECT_RING_STATE_SIZE;
+		set_offsets(regs, xe2_indirect_ring_state_offsets, hwe);
+	}
 
 	return data;
 }
@@ -713,25 +820,31 @@ int xe_lrc_init(struct xe_lrc *lrc, struct xe_hw_engine *hwe,
 	struct iosys_map map;
 	void *init_data = NULL;
 	u32 arb_enable;
+	u32 lrc_size;
 	int err;
 
 	lrc->flags = 0;
+	lrc_size = ring_size + xe_gt_lrc_size(gt, hwe->class);
+	if (xe_gt_has_indirect_ring_state(gt))
+		lrc->flags |= XE_LRC_FLAG_INDIRECT_RING_STATE;
 
 	/*
 	 * FIXME: Perma-pinning LRC as we don't yet support moving GGTT address
 	 * via VM bind calls.
 	 */
-	lrc->bo = xe_bo_create_pin_map(xe, tile, vm,
-				      ring_size + xe_lrc_size(xe, hwe->class),
-				      ttm_bo_type_kernel,
-				      XE_BO_CREATE_VRAM_IF_DGFX(tile) |
-				      XE_BO_CREATE_GGTT_BIT);
+	lrc->bo = xe_bo_create_pin_map(xe, tile, vm, lrc_size,
+				       ttm_bo_type_kernel,
+				       XE_BO_FLAG_VRAM_IF_DGFX(tile) |
+				       XE_BO_FLAG_GGTT |
+				       XE_BO_FLAG_GGTT_INVALIDATE);
 	if (IS_ERR(lrc->bo))
 		return PTR_ERR(lrc->bo);
 
+	lrc->size = lrc_size;
 	lrc->tile = gt_to_tile(hwe->gt);
 	lrc->ring.size = ring_size;
 	lrc->ring.tail = 0;
+	lrc->ctx_timestamp = 0;
 
 	xe_hw_fence_ctx_init(&lrc->fence_ctx, hwe->gt,
 			     hwe->fence_irq, hwe->name);
@@ -753,10 +866,10 @@ int xe_lrc_init(struct xe_lrc *lrc, struct xe_hw_engine *hwe,
 		xe_map_memset(xe, &map, 0, 0, LRC_PPHWSP_SIZE);	/* PPHWSP */
 		xe_map_memcpy_to(xe, &map, LRC_PPHWSP_SIZE,
 				 gt->default_lrc[hwe->class] + LRC_PPHWSP_SIZE,
-				 xe_lrc_size(xe, hwe->class) - LRC_PPHWSP_SIZE);
+				 xe_gt_lrc_size(gt, hwe->class) - LRC_PPHWSP_SIZE);
 	} else {
 		xe_map_memcpy_to(xe, &map, 0, init_data,
-				 xe_lrc_size(xe, hwe->class));
+				 xe_gt_lrc_size(gt, hwe->class));
 		kfree(init_data);
 	}
 
@@ -767,16 +880,32 @@ int xe_lrc_init(struct xe_lrc *lrc, struct xe_hw_engine *hwe,
 			xe_drm_client_add_bo(vm->xef->client, lrc->bo);
 	}
 
-	xe_lrc_write_ctx_reg(lrc, CTX_RING_START, __xe_lrc_ring_ggtt_addr(lrc));
-	xe_lrc_write_ctx_reg(lrc, CTX_RING_HEAD, 0);
-	xe_lrc_write_ctx_reg(lrc, CTX_RING_TAIL, lrc->ring.tail);
-	xe_lrc_write_ctx_reg(lrc, CTX_RING_CTL,
-			     RING_CTL_SIZE(lrc->ring.size) | RING_VALID);
+	if (xe_gt_has_indirect_ring_state(gt)) {
+		xe_lrc_write_ctx_reg(lrc, CTX_INDIRECT_RING_STATE,
+				     __xe_lrc_indirect_ring_ggtt_addr(lrc));
+
+		xe_lrc_write_indirect_ctx_reg(lrc, INDIRECT_CTX_RING_START,
+					      __xe_lrc_ring_ggtt_addr(lrc));
+		xe_lrc_write_indirect_ctx_reg(lrc, INDIRECT_CTX_RING_START_UDW, 0);
+		xe_lrc_write_indirect_ctx_reg(lrc, INDIRECT_CTX_RING_HEAD, 0);
+		xe_lrc_write_indirect_ctx_reg(lrc, INDIRECT_CTX_RING_TAIL, lrc->ring.tail);
+		xe_lrc_write_indirect_ctx_reg(lrc, INDIRECT_CTX_RING_CTL,
+					      RING_CTL_SIZE(lrc->ring.size) | RING_VALID);
+	} else {
+		xe_lrc_write_ctx_reg(lrc, CTX_RING_START, __xe_lrc_ring_ggtt_addr(lrc));
+		xe_lrc_write_ctx_reg(lrc, CTX_RING_HEAD, 0);
+		xe_lrc_write_ctx_reg(lrc, CTX_RING_TAIL, lrc->ring.tail);
+		xe_lrc_write_ctx_reg(lrc, CTX_RING_CTL,
+				     RING_CTL_SIZE(lrc->ring.size) | RING_VALID);
+	}
+
+	xe_lrc_write_ctx_reg(lrc, CTX_TIMESTAMP, 0);
+
 	if (xe->info.has_asid && vm)
 		xe_lrc_write_ctx_reg(lrc, PVC_CTX_ASID, vm->usm.asid);
 
 	lrc->desc = LRC_VALID;
-	lrc->desc |= LRC_LEGACY_64B_CONTEXT << LRC_ADDRESSING_MODE_SHIFT;
+	lrc->desc |= FIELD_PREP(LRC_ADDRESSING_MODE, LRC_LEGACY_64B_CONTEXT);
 	/* TODO: Priority */
 
 	/* While this appears to have something about privileged batches or
@@ -786,8 +915,8 @@ int xe_lrc_init(struct xe_lrc *lrc, struct xe_hw_engine *hwe,
 		lrc->desc |= LRC_PRIVILEGE;
 
 	if (GRAPHICS_VERx100(xe) < 1250) {
-		lrc->desc |= (u64)hwe->instance << ENGINE_INSTANCE_SHIFT;
-		lrc->desc |= (u64)hwe->class << ENGINE_CLASS_SHIFT;
+		lrc->desc |= FIELD_PREP(LRC_ENGINE_INSTANCE, hwe->instance);
+		lrc->desc |= FIELD_PREP(LRC_ENGINE_CLASS, hwe->class);
 	}
 
 	arb_enable = MI_ARB_ON_OFF | MI_ARB_ENABLE;
@@ -815,14 +944,36 @@ void xe_lrc_finish(struct xe_lrc *lrc)
 	xe_bo_put(lrc->bo);
 }
 
+void xe_lrc_set_ring_tail(struct xe_lrc *lrc, u32 tail)
+{
+	if (xe_lrc_has_indirect_ring_state(lrc))
+		xe_lrc_write_indirect_ctx_reg(lrc, INDIRECT_CTX_RING_TAIL, tail);
+	else
+		xe_lrc_write_ctx_reg(lrc, CTX_RING_TAIL, tail);
+}
+
+u32 xe_lrc_ring_tail(struct xe_lrc *lrc)
+{
+	if (xe_lrc_has_indirect_ring_state(lrc))
+		return xe_lrc_read_indirect_ctx_reg(lrc, INDIRECT_CTX_RING_TAIL) & TAIL_ADDR;
+	else
+		return xe_lrc_read_ctx_reg(lrc, CTX_RING_TAIL) & TAIL_ADDR;
+}
+
 void xe_lrc_set_ring_head(struct xe_lrc *lrc, u32 head)
 {
-	xe_lrc_write_ctx_reg(lrc, CTX_RING_HEAD, head);
+	if (xe_lrc_has_indirect_ring_state(lrc))
+		xe_lrc_write_indirect_ctx_reg(lrc, INDIRECT_CTX_RING_HEAD, head);
+	else
+		xe_lrc_write_ctx_reg(lrc, CTX_RING_HEAD, head);
 }
 
 u32 xe_lrc_ring_head(struct xe_lrc *lrc)
 {
-	return xe_lrc_read_ctx_reg(lrc, CTX_RING_HEAD) & HEAD_ADDR;
+	if (xe_lrc_has_indirect_ring_state(lrc))
+		return xe_lrc_read_indirect_ctx_reg(lrc, INDIRECT_CTX_RING_HEAD) & HEAD_ADDR;
+	else
+		return xe_lrc_read_ctx_reg(lrc, CTX_RING_HEAD) & HEAD_ADDR;
 }
 
 u32 xe_lrc_ring_space(struct xe_lrc *lrc)
@@ -1034,6 +1185,8 @@ static int dump_gfxpipe_command(struct drm_printer *p,
 	MATCH(GPGPU_CSR_BASE_ADDRESS);
 	MATCH(STATE_COMPUTE_MODE);
 	MATCH3D(3DSTATE_BTD);
+	MATCH(STATE_SYSTEM_MEM_FENCE_ADDRESS);
+	MATCH(STATE_CONTEXT_DATA_BASE_ADDRESS);
 
 	MATCH3D(3DSTATE_VF_STATISTICS);
 
@@ -1058,6 +1211,7 @@ static int dump_gfxpipe_command(struct drm_printer *p,
 	MATCH3D(3DSTATE_WM);
 	MATCH3D(3DSTATE_CONSTANT_VS);
 	MATCH3D(3DSTATE_CONSTANT_GS);
+	MATCH3D(3DSTATE_CONSTANT_PS);
 	MATCH3D(3DSTATE_SAMPLE_MASK);
 	MATCH3D(3DSTATE_CONSTANT_HS);
 	MATCH3D(3DSTATE_CONSTANT_DS);
@@ -1150,6 +1304,31 @@ static int dump_gfxpipe_command(struct drm_printer *p,
 	}
 }
 
+static int dump_gfx_state_command(struct drm_printer *p,
+				  struct xe_gt *gt,
+				  u32 *dw,
+				  int remaining_dw)
+{
+	u32 numdw = instr_dw(*dw);
+	u32 opcode = REG_FIELD_GET(GFX_STATE_OPCODE, *dw);
+
+	/*
+	 * Make sure we haven't mis-parsed a number of dwords that exceeds the
+	 * remaining size of the LRC.
+	 */
+	if (xe_gt_WARN_ON(gt, numdw > remaining_dw))
+		numdw = remaining_dw;
+
+	switch (*dw & (XE_INSTR_GFX_STATE | GFX_STATE_OPCODE)) {
+	MATCH(STATE_WRITE_INLINE);
+
+	default:
+		drm_printf(p, "[%#010x] unknown GFX_STATE command (opcode=%#x), likely %d dwords\n",
+			   *dw, opcode, numdw);
+		return numdw;
+	}
+}
+
 void xe_lrc_dump_default(struct drm_printer *p,
 			 struct xe_gt *gt,
 			 enum xe_engine_class hwe_class)
@@ -1167,13 +1346,15 @@ void xe_lrc_dump_default(struct drm_printer *p,
 	 * hardware status page.
 	 */
 	dw = gt->default_lrc[hwe_class] + LRC_PPHWSP_SIZE;
-	remaining_dw = (xe_lrc_size(gt_to_xe(gt), hwe_class) - LRC_PPHWSP_SIZE) / 4;
+	remaining_dw = (xe_gt_lrc_size(gt, hwe_class) - LRC_PPHWSP_SIZE) / 4;
 
 	while (remaining_dw > 0) {
 		if ((*dw & XE_INSTR_CMD_TYPE) == XE_INSTR_MI) {
 			num_dw = dump_mi_command(p, gt, dw, remaining_dw);
 		} else if ((*dw & XE_INSTR_CMD_TYPE) == XE_INSTR_GFXPIPE) {
 			num_dw = dump_gfxpipe_command(p, gt, dw, remaining_dw);
+		} else if ((*dw & XE_INSTR_CMD_TYPE) == XE_INSTR_GFX_STATE) {
+			num_dw = dump_gfx_state_command(p, gt, dw, remaining_dw);
 		} else {
 			num_dw = min(instr_dw(*dw), remaining_dw);
 			drm_printf(p, "[%#10x] Unknown instruction of type %#x, likely %d dwords\n",
@@ -1296,4 +1477,114 @@ void xe_lrc_emit_hwe_state_instructions(struct xe_exec_queue *q, struct xe_bb *b
 
 		bb->len += num_dw;
 	}
+}
+
+struct xe_lrc_snapshot *xe_lrc_snapshot_capture(struct xe_lrc *lrc)
+{
+	struct xe_lrc_snapshot *snapshot = kmalloc(sizeof(*snapshot), GFP_NOWAIT);
+
+	if (!snapshot)
+		return NULL;
+
+	snapshot->context_desc = xe_lrc_ggtt_addr(lrc);
+	snapshot->indirect_context_desc = xe_lrc_indirect_ring_ggtt_addr(lrc);
+	snapshot->head = xe_lrc_ring_head(lrc);
+	snapshot->tail.internal = lrc->ring.tail;
+	snapshot->tail.memory = xe_lrc_ring_tail(lrc);
+	snapshot->start_seqno = xe_lrc_start_seqno(lrc);
+	snapshot->seqno = xe_lrc_seqno(lrc);
+	snapshot->lrc_bo = xe_bo_get(lrc->bo);
+	snapshot->lrc_offset = xe_lrc_pphwsp_offset(lrc);
+	snapshot->lrc_size = lrc->bo->size - snapshot->lrc_offset;
+	snapshot->lrc_snapshot = NULL;
+	return snapshot;
+}
+
+void xe_lrc_snapshot_capture_delayed(struct xe_lrc_snapshot *snapshot)
+{
+	struct xe_bo *bo;
+	struct iosys_map src;
+
+	if (!snapshot)
+		return;
+
+	bo = snapshot->lrc_bo;
+	snapshot->lrc_bo = NULL;
+
+	snapshot->lrc_snapshot = kvmalloc(snapshot->lrc_size, GFP_KERNEL);
+	if (!snapshot->lrc_snapshot)
+		goto put_bo;
+
+	xe_bo_lock(bo, false);
+	if (!ttm_bo_vmap(&bo->ttm, &src)) {
+		xe_map_memcpy_from(xe_bo_device(bo),
+				   snapshot->lrc_snapshot, &src, snapshot->lrc_offset,
+				   snapshot->lrc_size);
+		ttm_bo_vunmap(&bo->ttm, &src);
+	} else {
+		kvfree(snapshot->lrc_snapshot);
+		snapshot->lrc_snapshot = NULL;
+	}
+	xe_bo_unlock(bo);
+put_bo:
+	xe_bo_put(bo);
+}
+
+void xe_lrc_snapshot_print(struct xe_lrc_snapshot *snapshot, struct drm_printer *p)
+{
+	unsigned long i;
+
+	if (!snapshot)
+		return;
+
+	drm_printf(p, "\tHW Context Desc: 0x%08x\n", snapshot->context_desc);
+	drm_printf(p, "\tHW Indirect Ring State: 0x%08x\n",
+		   snapshot->indirect_context_desc);
+	drm_printf(p, "\tLRC Head: (memory) %u\n", snapshot->head);
+	drm_printf(p, "\tLRC Tail: (internal) %u, (memory) %u\n",
+		   snapshot->tail.internal, snapshot->tail.memory);
+	drm_printf(p, "\tStart seqno: (memory) %d\n", snapshot->start_seqno);
+	drm_printf(p, "\tSeqno: (memory) %d\n", snapshot->seqno);
+
+	if (!snapshot->lrc_snapshot)
+		return;
+
+	drm_printf(p, "\t[HWSP].length: 0x%x\n", LRC_PPHWSP_SIZE);
+	drm_puts(p, "\t[HWSP].data: ");
+	for (i = 0; i < LRC_PPHWSP_SIZE; i += sizeof(u32)) {
+		u32 *val = snapshot->lrc_snapshot + i;
+		char dumped[ASCII85_BUFSZ];
+
+		drm_puts(p, ascii85_encode(*val, dumped));
+	}
+
+	drm_printf(p, "\n\t[HWCTX].length: 0x%lx\n", snapshot->lrc_size - LRC_PPHWSP_SIZE);
+	drm_puts(p, "\t[HWCTX].data: ");
+	for (; i < snapshot->lrc_size; i += sizeof(u32)) {
+		u32 *val = snapshot->lrc_snapshot + i;
+		char dumped[ASCII85_BUFSZ];
+
+		drm_puts(p, ascii85_encode(*val, dumped));
+	}
+	drm_puts(p, "\n");
+}
+
+void xe_lrc_snapshot_free(struct xe_lrc_snapshot *snapshot)
+{
+	if (!snapshot)
+		return;
+
+	kvfree(snapshot->lrc_snapshot);
+	if (snapshot->lrc_bo)
+		xe_bo_put(snapshot->lrc_bo);
+	kfree(snapshot);
+}
+
+u32 xe_lrc_update_timestamp(struct xe_lrc *lrc, u32 *old_ts)
+{
+	*old_ts = lrc->ctx_timestamp;
+
+	lrc->ctx_timestamp = xe_lrc_read_ctx_reg(lrc, CTX_TIMESTAMP);
+
+	return lrc->ctx_timestamp;
 }

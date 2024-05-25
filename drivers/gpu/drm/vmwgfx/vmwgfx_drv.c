@@ -32,11 +32,12 @@
 #include "vmwgfx_binding.h"
 #include "vmwgfx_devcaps.h"
 #include "vmwgfx_mksstat.h"
+#include "vmwgfx_vkms.h"
 #include "ttm_object.h"
 
 #include <drm/drm_aperture.h>
 #include <drm/drm_drv.h>
-#include <drm/drm_fbdev_generic.h>
+#include <drm/drm_fbdev_ttm.h>
 #include <drm/drm_gem_ttm_helper.h>
 #include <drm/drm_ioctl.h>
 #include <drm/drm_module.h>
@@ -911,6 +912,8 @@ static int vmw_driver_load(struct vmw_private *dev_priv, u32 pci_id)
 			     "Please switch to a supported graphics device to avoid problems.");
 	}
 
+	vmw_vkms_init(dev_priv);
+
 	ret = vmw_dma_select_mode(dev_priv);
 	if (unlikely(ret != 0)) {
 		drm_info(&dev_priv->drm,
@@ -1196,6 +1199,7 @@ static void vmw_driver_unload(struct drm_device *dev)
 
 	vmw_svga_disable(dev_priv);
 
+	vmw_vkms_cleanup(dev_priv);
 	vmw_kms_close(dev_priv);
 	vmw_overlay_close(dev_priv);
 
@@ -1681,7 +1685,7 @@ static int vmw_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	vmw_fifo_resource_inc(vmw);
 	vmw_svga_enable(vmw);
-	drm_fbdev_generic_setup(&vmw->drm,  0);
+	drm_fbdev_ttm_setup(&vmw->drm,  0);
 
 	vmw_debugfs_gem_init(vmw);
 	vmw_debugfs_resource_managers_init(vmw);

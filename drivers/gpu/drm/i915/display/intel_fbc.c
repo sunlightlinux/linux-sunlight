@@ -48,12 +48,14 @@
 #include "i915_utils.h"
 #include "i915_vgpu.h"
 #include "i915_vma.h"
+#include "i9xx_plane_regs.h"
 #include "intel_cdclk.h"
 #include "intel_de.h"
 #include "intel_display_device.h"
 #include "intel_display_trace.h"
 #include "intel_display_types.h"
 #include "intel_fbc.h"
+#include "intel_fbc_regs.h"
 #include "intel_frontbuffer.h"
 
 #define for_each_fbc_id(__dev_priv, __fbc_id) \
@@ -325,8 +327,8 @@ static void i8xx_fbc_nuke(struct intel_fbc *fbc)
 	enum i9xx_plane_id i9xx_plane = fbc_state->plane->i9xx_plane;
 	struct drm_i915_private *dev_priv = fbc->i915;
 
-	intel_de_write_fw(dev_priv, DSPADDR(i9xx_plane),
-			  intel_de_read_fw(dev_priv, DSPADDR(i9xx_plane)));
+	intel_de_write_fw(dev_priv, DSPADDR(dev_priv, i9xx_plane),
+			  intel_de_read_fw(dev_priv, DSPADDR(dev_priv, i9xx_plane)));
 }
 
 static void i8xx_fbc_program_cfb(struct intel_fbc *fbc)
@@ -362,8 +364,8 @@ static void i965_fbc_nuke(struct intel_fbc *fbc)
 	enum i9xx_plane_id i9xx_plane = fbc_state->plane->i9xx_plane;
 	struct drm_i915_private *dev_priv = fbc->i915;
 
-	intel_de_write_fw(dev_priv, DSPSURF(i9xx_plane),
-			  intel_de_read_fw(dev_priv, DSPSURF(i9xx_plane)));
+	intel_de_write_fw(dev_priv, DSPSURF(dev_priv, i9xx_plane),
+			  intel_de_read_fw(dev_priv, DSPSURF(dev_priv, i9xx_plane)));
 }
 
 static const struct intel_fbc_funcs i965_fbc_funcs = {
@@ -826,10 +828,36 @@ static void intel_fbc_program_cfb(struct intel_fbc *fbc)
 
 static void intel_fbc_program_workarounds(struct intel_fbc *fbc)
 {
+	struct drm_i915_private *i915 = fbc->i915;
+
+	if (IS_SKYLAKE(i915) || IS_BROXTON(i915)) {
+		/*
+		 * WaFbcHighMemBwCorruptionAvoidance:skl,bxt
+		 * Display WA #0883: skl,bxt
+		 */
+		intel_de_rmw(i915, ILK_DPFC_CHICKEN(fbc->id),
+			     0, DPFC_DISABLE_DUMMY0);
+	}
+
+	if (IS_SKYLAKE(i915) || IS_KABYLAKE(i915) ||
+	    IS_COFFEELAKE(i915) || IS_COMETLAKE(i915)) {
+		/*
+		 * WaFbcNukeOnHostModify:skl,kbl,cfl
+		 * Display WA #0873: skl,kbl,cfl
+		 */
+		intel_de_rmw(i915, ILK_DPFC_CHICKEN(fbc->id),
+			     0, DPFC_NUKE_ON_ANY_MODIFICATION);
+	}
+
+	/* Wa_1409120013:icl,jsl,tgl,dg1 */
+	if (IS_DISPLAY_VER(i915, 11, 12))
+		intel_de_rmw(i915, ILK_DPFC_CHICKEN(fbc->id),
+			     0, DPFC_CHICKEN_COMP_DUMMY_PIXEL);
+
 	/* Wa_22014263786:icl,jsl,tgl,dg1,rkl,adls,adlp,mtl */
-	if (DISPLAY_VER(fbc->i915) >= 11 && !IS_DG2(fbc->i915))
-		intel_de_rmw(fbc->i915, ILK_DPFC_CHICKEN(fbc->id), 0,
-			     DPFC_CHICKEN_FORCE_SLB_INVALIDATION);
+	if (DISPLAY_VER(i915) >= 11 && !IS_DG2(i915))
+		intel_de_rmw(i915, ILK_DPFC_CHICKEN(fbc->id),
+			     0, DPFC_CHICKEN_FORCE_SLB_INVALIDATION);
 }
 
 static void __intel_fbc_cleanup_cfb(struct intel_fbc *fbc)
@@ -1224,7 +1252,8 @@ static int intel_fbc_check_plane(struct intel_atomic_state *state,
 	 * Recommendation is to keep this combination disabled
 	 * Bspec: 50422 HSD: 14010260002
 	 */
-	if (IS_DISPLAY_VER(i915, 12, 14) && crtc_state->has_psr2) {
+	if (IS_DISPLAY_VER(i915, 12, 14) && crtc_state->has_sel_update &&
+	    !crtc_state->has_panel_replay) {
 		plane_state->no_fbc_reason = "PSR2 enabled";
 		return 0;
 	}
@@ -1232,7 +1261,7 @@ static int intel_fbc_check_plane(struct intel_atomic_state *state,
 	/* Wa_14016291713 */
 	if ((IS_DISPLAY_VER(i915, 12, 13) ||
 	     IS_DISPLAY_IP_STEP(i915, IP_VER(14, 0), STEP_A0, STEP_C0)) &&
-	    crtc_state->has_psr) {
+	    crtc_state->has_psr && !crtc_state->has_panel_replay) {
 		plane_state->no_fbc_reason = "PSR1 enabled (Wa_14016291713)";
 		return 0;
 	}

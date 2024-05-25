@@ -6,6 +6,7 @@
 /* for ioread64 */
 #include <linux/io-64-nonatomic-lo-hi.h>
 
+#include "regs/xe_gtt_defs.h"
 #include "xe_ggtt.h"
 
 #include "i915_drv.h"
@@ -62,7 +63,7 @@ initial_plane_bo(struct xe_device *xe,
 	if (plane_config->size == 0)
 		return NULL;
 
-	flags = XE_BO_CREATE_PINNED_BIT | XE_BO_SCANOUT_BIT | XE_BO_CREATE_GGTT_BIT;
+	flags = XE_BO_FLAG_PINNED | XE_BO_FLAG_SCANOUT | XE_BO_FLAG_GGTT;
 
 	base = round_down(plane_config->base, page_size);
 	if (IS_DGFX(xe)) {
@@ -79,7 +80,7 @@ initial_plane_bo(struct xe_device *xe,
 		}
 
 		phys_base = pte & ~(page_size - 1);
-		flags |= XE_BO_CREATE_VRAM0_BIT;
+		flags |= XE_BO_FLAG_VRAM0;
 
 		/*
 		 * We don't currently expect this to ever be placed in the
@@ -101,7 +102,7 @@ initial_plane_bo(struct xe_device *xe,
 		if (!stolen)
 			return NULL;
 		phys_base = base;
-		flags |= XE_BO_CREATE_STOLEN_BIT;
+		flags |= XE_BO_FLAG_STOLEN;
 
 		/*
 		 * If the FB is too big, just don't use it since fbdev is not very
@@ -210,8 +211,8 @@ intel_find_initial_plane_obj(struct intel_crtc *crtc,
 	intel_fb_fill_view(to_intel_framebuffer(fb),
 			   plane_state->uapi.rotation, &plane_state->view);
 
-	vma = intel_pin_and_fence_fb_obj(fb, false, &plane_state->view.gtt,
-					 false, &plane_state->flags);
+	vma = intel_fb_pin_to_ggtt(fb, false, &plane_state->view.gtt,
+				   false, &plane_state->flags);
 	if (IS_ERR(vma))
 		goto nofb;
 

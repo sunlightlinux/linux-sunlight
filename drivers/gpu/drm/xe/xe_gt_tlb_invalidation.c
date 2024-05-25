@@ -7,11 +7,14 @@
 
 #include "abi/guc_actions_abi.h"
 #include "xe_device.h"
+#include "xe_force_wake.h"
 #include "xe_gt.h"
 #include "xe_gt_printk.h"
 #include "xe_guc.h"
 #include "xe_guc_ct.h"
+#include "xe_mmio.h"
 #include "xe_trace.h"
+#include "regs/xe_guc_regs.h"
 
 #define TLB_TIMEOUT	(HZ / 4)
 
@@ -209,7 +212,7 @@ static int send_tlb_invalidation(struct xe_guc *guc,
  * Return: Seqno which can be passed to xe_gt_tlb_invalidation_wait on success,
  * negative error code on error.
  */
-int xe_gt_tlb_invalidation_guc(struct xe_gt *gt)
+static int xe_gt_tlb_invalidation_guc(struct xe_gt *gt)
 {
 	u32 action[] = {
 		XE_GUC_ACTION_TLB_INVALIDATION,
@@ -219,6 +222,135 @@ int xe_gt_tlb_invalidation_guc(struct xe_gt *gt)
 
 	return send_tlb_invalidation(&gt->uc.guc, NULL, action,
 				     ARRAY_SIZE(action));
+}
+
+/**
+ * xe_gt_tlb_invalidation_ggtt - Issue a TLB invalidation on this GT for the GGTT
+ * @gt: graphics tile
+ *
+ * Issue a TLB invalidation for the GGTT. Completion of TLB invalidation is
+ * synchronous.
+ *
+ * Return: 0 on success, negative error code on error
+ */
+int xe_gt_tlb_invalidation_ggtt(struct xe_gt *gt)
+{
+	struct xe_device *xe = gt_to_xe(gt);
+
+	if (xe_guc_ct_enabled(&gt->uc.guc.ct) &&
+	    gt->uc.guc.submission_state.enabled) {
+		int seqno;
+
+		seqno = xe_gt_tlb_invalidation_guc(gt);
+		if (seqno <= 0)
+			return seqno;
+
+		xe_gt_tlb_invalidation_wait(gt, seqno);
+	} else if (xe_device_uc_enabled(xe) && !xe_device_wedged(xe)) {
+		xe_gt_WARN_ON(gt, xe_force_wake_get(gt_to_fw(gt), XE_FW_GT));
+		if (xe->info.platform == XE_PVC || GRAPHICS_VER(xe) >= 20) {
+			xe_mmio_write32(gt, PVC_GUC_TLB_INV_DESC1,
+					PVC_GUC_TLB_INV_DESC1_INVALIDATE);
+			xe_mmio_write32(gt, PVC_GUC_TLB_INV_DESC0,
+					PVC_GUC_TLB_INV_DESC0_VALID);
+		} else {
+			xe_mmio_write32(gt, GUC_TLB_INV_CR,
+					GUC_TLB_INV_CR_INVALIDATE);
+		}
+		xe_force_wake_put(gt_to_fw(gt), XE_FW_GT);
+	}
+
+	return 0;
+}
+
+/**
+ * xe_gt_tlb_invalidation_range - Issue a TLB invalidation on this GT for an
+ * address range
+ *
+ * @gt: graphics tile
+ * @fence: invalidation fence which will be signal on TLB invalidation
+ * completion, can be NULL
+ * @start: start address
+ * @end: end address
+ * @asid: address space id
+ *
+ * Issue a range based TLB invalidation if supported, if not fallback to a full
+ * TLB invalidation. Completion of TLB is asynchronous and caller can either use
+ * the invalidation fence or seqno + xe_gt_tlb_invalidation_wait to wait for
+ * completion.
+ *
+ * Return: Seqno which can be passed to xe_gt_tlb_invalidation_wait on success,
+ * negative error code on error.
+ */
+int xe_gt_tlb_invalidation_range(struct xe_gt *gt,
+				 struct xe_gt_tlb_invalidation_fence *fence,
+				 u64 start, u64 end, u32 asid)
+{
+	struct xe_device *xe = gt_to_xe(gt);
+#define MAX_TLB_INVALIDATION_LEN	7
+	u32 action[MAX_TLB_INVALIDATION_LEN];
+	int len = 0;
+
+	/* Execlists not supported */
+	if (gt_to_xe(gt)->info.force_execlist) {
+		if (fence)
+			__invalidation_fence_signal(fence);
+
+		return 0;
+	}
+
+	action[len++] = XE_GUC_ACTION_TLB_INVALIDATION;
+	action[len++] = 0; /* seqno, replaced in send_tlb_invalidation */
+	if (!xe->info.has_range_tlb_invalidation) {
+		action[len++] = MAKE_INVAL_OP(XE_GUC_TLB_INVAL_FULL);
+	} else {
+		u64 orig_start = start;
+		u64 length = end - start;
+		u64 align;
+
+		if (length < SZ_4K)
+			length = SZ_4K;
+
+		/*
+		 * We need to invalidate a higher granularity if start address
+		 * is not aligned to length. When start is not aligned with
+		 * length we need to find the length large enough to create an
+		 * address mask covering the required range.
+		 */
+		align = roundup_pow_of_two(length);
+		start = ALIGN_DOWN(start, align);
+		end = ALIGN(end, align);
+		length = align;
+		while (start + length < end) {
+			length <<= 1;
+			start = ALIGN_DOWN(orig_start, length);
+		}
+
+		/*
+		 * Minimum invalidation size for a 2MB page that the hardware
+		 * expects is 16MB
+		 */
+		if (length >= SZ_2M) {
+			length = max_t(u64, SZ_16M, length);
+			start = ALIGN_DOWN(orig_start, length);
+		}
+
+		xe_gt_assert(gt, length >= SZ_4K);
+		xe_gt_assert(gt, is_power_of_2(length));
+		xe_gt_assert(gt, !(length & GENMASK(ilog2(SZ_16M) - 1,
+						    ilog2(SZ_2M) + 1)));
+		xe_gt_assert(gt, IS_ALIGNED(start, length));
+
+		action[len++] = MAKE_INVAL_OP(XE_GUC_TLB_INVAL_PAGE_SELECTIVE);
+		action[len++] = asid;
+		action[len++] = lower_32_bits(start);
+		action[len++] = upper_32_bits(start);
+		action[len++] = ilog2(length) - ilog2(SZ_4K);
+	}
+
+	xe_gt_assert(gt, len <= MAX_TLB_INVALIDATION_LEN);
+
+	return send_tlb_invalidation(&gt->uc.guc, fence, action, len);
 }
 
 /**
@@ -240,72 +372,11 @@ int xe_gt_tlb_invalidation_vma(struct xe_gt *gt,
 			       struct xe_gt_tlb_invalidation_fence *fence,
 			       struct xe_vma *vma)
 {
-	struct xe_device *xe = gt_to_xe(gt);
-#define MAX_TLB_INVALIDATION_LEN	7
-	u32 action[MAX_TLB_INVALIDATION_LEN];
-	int len = 0;
-
 	xe_gt_assert(gt, vma);
 
-	/* Execlists not supported */
-	if (gt_to_xe(gt)->info.force_execlist) {
-		if (fence)
-			__invalidation_fence_signal(fence);
-
-		return 0;
-	}
-
-	action[len++] = XE_GUC_ACTION_TLB_INVALIDATION;
-	action[len++] = 0; /* seqno, replaced in send_tlb_invalidation */
-	if (!xe->info.has_range_tlb_invalidation) {
-		action[len++] = MAKE_INVAL_OP(XE_GUC_TLB_INVAL_FULL);
-	} else {
-		u64 start = xe_vma_start(vma);
-		u64 length = xe_vma_size(vma);
-		u64 align, end;
-
-		if (length < SZ_4K)
-			length = SZ_4K;
-
-		/*
-		 * We need to invalidate a higher granularity if start address
-		 * is not aligned to length. When start is not aligned with
-		 * length we need to find the length large enough to create an
-		 * address mask covering the required range.
-		 */
-		align = roundup_pow_of_two(length);
-		start = ALIGN_DOWN(xe_vma_start(vma), align);
-		end = ALIGN(xe_vma_end(vma), align);
-		length = align;
-		while (start + length < end) {
-			length <<= 1;
-			start = ALIGN_DOWN(xe_vma_start(vma), length);
-		}
-
-		/*
-		 * Minimum invalidation size for a 2MB page that the hardware
-		 * expects is 16MB
-		 */
-		if (length >= SZ_2M) {
-			length = max_t(u64, SZ_16M, length);
-			start = ALIGN_DOWN(xe_vma_start(vma), length);
-		}
-
-		xe_gt_assert(gt, length >= SZ_4K);
-		xe_gt_assert(gt, is_power_of_2(length));
-		xe_gt_assert(gt, !(length & GENMASK(ilog2(SZ_16M) - 1, ilog2(SZ_2M) + 1)));
-		xe_gt_assert(gt, IS_ALIGNED(start, length));
-
-		action[len++] = MAKE_INVAL_OP(XE_GUC_TLB_INVAL_PAGE_SELECTIVE);
-		action[len++] = xe_vma_vm(vma)->usm.asid;
-		action[len++] = lower_32_bits(start);
-		action[len++] = upper_32_bits(start);
-		action[len++] = ilog2(length) - ilog2(SZ_4K);
-	}
-
-	xe_gt_assert(gt, len <= MAX_TLB_INVALIDATION_LEN);
-
-	return send_tlb_invalidation(&gt->uc.guc, fence, action, len);
+	return xe_gt_tlb_invalidation_range(gt, fence, xe_vma_start(vma),
+					    xe_vma_end(vma),
+					    xe_vma_vm(vma)->usm.asid);
 }
 
 /**

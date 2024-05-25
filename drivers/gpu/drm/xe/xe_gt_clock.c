@@ -7,6 +7,7 @@
 
 #include "regs/xe_gt_regs.h"
 #include "regs/xe_regs.h"
+#include "xe_assert.h"
 #include "xe_device.h"
 #include "xe_gt.h"
 #include "xe_macros.h"
@@ -77,9 +78,4 @@ int xe_gt_clock_init(struct xe_gt *gt)
 
 	gt->info.reference_clock = freq;
 	return 0;
-}
-
-u64 xe_gt_clock_cycles_to_ns(const struct xe_gt *gt, u64 count)
-{
-	return DIV_ROUND_CLOSEST_ULL(count * NSEC_PER_SEC, gt->info.reference_clock);
 }

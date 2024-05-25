@@ -41,6 +41,9 @@
 #include "gvt.h"
 #include "i915_pvinfo.h"
 #include "intel_mchbar_regs.h"
+#include "display/bxt_dpio_phy_regs.h"
+#include "display/i9xx_plane_regs.h"
+#include "display/intel_cursor_regs.h"
 #include "display/intel_display_types.h"
 #include "display/intel_dmc_regs.h"
 #include "display/intel_dp_aux_regs.h"
@@ -49,6 +52,8 @@
 #include "display/intel_fdi_regs.h"
 #include "display/intel_pps_regs.h"
 #include "display/intel_psr_regs.h"
+#include "display/intel_sprite_regs.h"
+#include "display/skl_universal_plane_regs.h"
 #include "display/skl_watermark_regs.h"
 #include "display/vlv_dsi_pll_regs.h"
 #include "gt/intel_gt_regs.h"
@@ -1003,7 +1008,7 @@ static int south_chicken2_mmio_write(struct intel_vgpu *vgpu,
 }
 
 #define DSPSURF_TO_PIPE(offset) \
-	calc_index(offset, _DSPASURF, _DSPBSURF, 0, DSPSURF(PIPE_C))
+	calc_index(offset, _DSPASURF, _DSPBSURF, 0, DSPSURF(dev_priv, PIPE_C))
 
 static int pri_surf_mmio_write(struct intel_vgpu *vgpu, unsigned int offset,
 		void *p_data, unsigned int bytes)
@@ -1013,11 +1018,11 @@ static int pri_surf_mmio_write(struct intel_vgpu *vgpu, unsigned int offset,
 	int event = SKL_FLIP_EVENT(pipe, PLANE_PRIMARY);
 
 	write_vreg(vgpu, offset, p_data, bytes);
-	vgpu_vreg_t(vgpu, DSPSURFLIVE(pipe)) = vgpu_vreg(vgpu, offset);
+	vgpu_vreg_t(vgpu, DSPSURFLIVE(dev_priv, pipe)) = vgpu_vreg(vgpu, offset);
 
 	vgpu_vreg_t(vgpu, PIPE_FLIPCOUNT_G4X(pipe))++;
 
-	if (vgpu_vreg_t(vgpu, DSPCNTR(pipe)) & PLANE_CTL_ASYNC_FLIP)
+	if (vgpu_vreg_t(vgpu, DSPCNTR(dev_priv, pipe)) & PLANE_CTL_ASYNC_FLIP)
 		intel_vgpu_trigger_virtual_event(vgpu, event);
 	else
 		set_bit(event, vgpu->irq.flip_done_event[pipe]);
@@ -1056,7 +1061,7 @@ static int reg50080_mmio_write(struct intel_vgpu *vgpu,
 
 	write_vreg(vgpu, offset, p_data, bytes);
 	if (plane == PLANE_PRIMARY) {
-		vgpu_vreg_t(vgpu, DSPSURFLIVE(pipe)) = vgpu_vreg(vgpu, offset);
+		vgpu_vreg_t(vgpu, DSPSURFLIVE(dev_priv, pipe)) = vgpu_vreg(vgpu, offset);
 		vgpu_vreg_t(vgpu, PIPE_FLIPCOUNT_G4X(pipe))++;
 	} else {
 		vgpu_vreg_t(vgpu, SPRSURFLIVE(pipe)) = vgpu_vreg(vgpu, offset);
@@ -2271,13 +2276,13 @@ static int init_generic_mmio_info(struct intel_gvt *gvt)
 	MMIO_DH(TRANSCONF(TRANSCODER_B), D_ALL, NULL, pipeconf_mmio_write);
 	MMIO_DH(TRANSCONF(TRANSCODER_C), D_ALL, NULL, pipeconf_mmio_write);
 	MMIO_DH(TRANSCONF(TRANSCODER_EDP), D_ALL, NULL, pipeconf_mmio_write);
-	MMIO_DH(DSPSURF(PIPE_A), D_ALL, NULL, pri_surf_mmio_write);
+	MMIO_DH(DSPSURF(dev_priv, PIPE_A), D_ALL, NULL, pri_surf_mmio_write);
 	MMIO_DH(REG_50080(PIPE_A, PLANE_PRIMARY), D_ALL, NULL,
 		reg50080_mmio_write);
-	MMIO_DH(DSPSURF(PIPE_B), D_ALL, NULL, pri_surf_mmio_write);
+	MMIO_DH(DSPSURF(dev_priv, PIPE_B), D_ALL, NULL, pri_surf_mmio_write);
 	MMIO_DH(REG_50080(PIPE_B, PLANE_PRIMARY), D_ALL, NULL,
 		reg50080_mmio_write);
-	MMIO_DH(DSPSURF(PIPE_C), D_ALL, NULL, pri_surf_mmio_write);
+	MMIO_DH(DSPSURF(dev_priv, PIPE_C), D_ALL, NULL, pri_surf_mmio_write);
 	MMIO_DH(REG_50080(PIPE_C, PLANE_PRIMARY), D_ALL, NULL,
 		reg50080_mmio_write);
 	MMIO_DH(SPRSURF(PIPE_A), D_ALL, NULL, spr_surf_mmio_write);
@@ -2674,35 +2679,35 @@ static int init_skl_mmio_info(struct intel_gvt *gvt)
 	MMIO_DH(PLANE_NV12_BUF_CFG(PIPE_C, 2), D_SKL_PLUS, NULL, NULL);
 	MMIO_DH(PLANE_NV12_BUF_CFG(PIPE_C, 3), D_SKL_PLUS, NULL, NULL);
 
-	MMIO_DH(_MMIO(_REG_701C0(PIPE_A, 1)), D_SKL_PLUS, NULL, NULL);
-	MMIO_DH(_MMIO(_REG_701C0(PIPE_A, 2)), D_SKL_PLUS, NULL, NULL);
-	MMIO_DH(_MMIO(_REG_701C0(PIPE_A, 3)), D_SKL_PLUS, NULL, NULL);
-	MMIO_DH(_MMIO(_REG_701C0(PIPE_A, 4)), D_SKL_PLUS, NULL, NULL);
+	MMIO_DH(PLANE_AUX_DIST(PIPE_A, 0), D_SKL_PLUS, NULL, NULL);
+	MMIO_DH(PLANE_AUX_DIST(PIPE_A, 1), D_SKL_PLUS, NULL, NULL);
+	MMIO_DH(PLANE_AUX_DIST(PIPE_A, 2), D_SKL_PLUS, NULL, NULL);
+	MMIO_DH(PLANE_AUX_DIST(PIPE_A, 3), D_SKL_PLUS, NULL, NULL);
 
-	MMIO_DH(_MMIO(_REG_701C0(PIPE_B, 1)), D_SKL_PLUS, NULL, NULL);
-	MMIO_DH(_MMIO(_REG_701C0(PIPE_B, 2)), D_SKL_PLUS, NULL, NULL);
-	MMIO_DH(_MMIO(_REG_701C0(PIPE_B, 3)), D_SKL_PLUS, NULL, NULL);
-	MMIO_DH(_MMIO(_REG_701C0(PIPE_B, 4)), D_SKL_PLUS, NULL, NULL);
+	MMIO_DH(PLANE_AUX_DIST(PIPE_B, 0), D_SKL_PLUS, NULL, NULL);
+	MMIO_DH(PLANE_AUX_DIST(PIPE_B, 1), D_SKL_PLUS, NULL, NULL);
+	MMIO_DH(PLANE_AUX_DIST(PIPE_B, 2), D_SKL_PLUS, NULL, NULL);
+	MMIO_DH(PLANE_AUX_DIST(PIPE_B, 3), D_SKL_PLUS, NULL, NULL);
 
-	MMIO_DH(_MMIO(_REG_701C0(PIPE_C, 1)), D_SKL_PLUS, NULL, NULL);
-	MMIO_DH(_MMIO(_REG_701C0(PIPE_C, 2)), D_SKL_PLUS, NULL, NULL);
-	MMIO_DH(_MMIO(_REG_701C0(PIPE_C, 3)), D_SKL_PLUS, NULL, NULL);
-	MMIO_DH(_MMIO(_REG_701C0(PIPE_C, 4)), D_SKL_PLUS, NULL, NULL);
+	MMIO_DH(PLANE_AUX_DIST(PIPE_C, 0), D_SKL_PLUS, NULL, NULL);
+	MMIO_DH(PLANE_AUX_DIST(PIPE_C, 1), D_SKL_PLUS, NULL, NULL);
+	MMIO_DH(PLANE_AUX_DIST(PIPE_C, 2), D_SKL_PLUS, NULL, NULL);
+	MMIO_DH(PLANE_AUX_DIST(PIPE_C, 3), D_SKL_PLUS, NULL, NULL);
 
-	MMIO_DH(_MMIO(_REG_701C4(PIPE_A, 1)), D_SKL_PLUS, NULL, NULL);
-	MMIO_DH(_MMIO(_REG_701C4(PIPE_A, 2)), D_SKL_PLUS, NULL, NULL);
-	MMIO_DH(_MMIO(_REG_701C4(PIPE_A, 3)), D_SKL_PLUS, NULL, NULL);
-	MMIO_DH(_MMIO(_REG_701C4(PIPE_A, 4)), D_SKL_PLUS, NULL, NULL);
+	MMIO_DH(PLANE_AUX_OFFSET(PIPE_A, 0), D_SKL_PLUS, NULL, NULL);
+	MMIO_DH(PLANE_AUX_OFFSET(PIPE_A, 1), D_SKL_PLUS, NULL, NULL);
+	MMIO_DH(PLANE_AUX_OFFSET(PIPE_A, 2), D_SKL_PLUS, NULL, NULL);
+	MMIO_DH(PLANE_AUX_OFFSET(PIPE_A, 3), D_SKL_PLUS, NULL, NULL);
 
-	MMIO_DH(_MMIO(_REG_701C4(PIPE_B, 1)), D_SKL_PLUS, NULL, NULL);
-	MMIO_DH(_MMIO(_REG_701C4(PIPE_B, 2)), D_SKL_PLUS, NULL, NULL);
-	MMIO_DH(_MMIO(_REG_701C4(PIPE_B, 3)), D_SKL_PLUS, NULL, NULL);
-	MMIO_DH(_MMIO(_REG_701C4(PIPE_B, 4)), D_SKL_PLUS, NULL, NULL);
+	MMIO_DH(PLANE_AUX_OFFSET(PIPE_B, 0), D_SKL_PLUS, NULL, NULL);
+	MMIO_DH(PLANE_AUX_OFFSET(PIPE_B, 1), D_SKL_PLUS, NULL, NULL);
+	MMIO_DH(PLANE_AUX_OFFSET(PIPE_B, 2), D_SKL_PLUS, NULL, NULL);
+	MMIO_DH(PLANE_AUX_OFFSET(PIPE_B, 3), D_SKL_PLUS, NULL, NULL);
 
-	MMIO_DH(_MMIO(_REG_701C4(PIPE_C, 1)), D_SKL_PLUS, NULL, NULL);
-	MMIO_DH(_MMIO(_REG_701C4(PIPE_C, 2)), D_SKL_PLUS, NULL, NULL);
-	MMIO_DH(_MMIO(_REG_701C4(PIPE_C, 3)), D_SKL_PLUS, NULL, NULL);
-	MMIO_DH(_MMIO(_REG_701C4(PIPE_C, 4)), D_SKL_PLUS, NULL, NULL);
+	MMIO_DH(PLANE_AUX_OFFSET(PIPE_C, 0), D_SKL_PLUS, NULL, NULL);
+	MMIO_DH(PLANE_AUX_OFFSET(PIPE_C, 1), D_SKL_PLUS, NULL, NULL);
+	MMIO_DH(PLANE_AUX_OFFSET(PIPE_C, 2), D_SKL_PLUS, NULL, NULL);
+	MMIO_DH(PLANE_AUX_OFFSET(PIPE_C, 3), D_SKL_PLUS, NULL, NULL);
 
 	MMIO_DFH(BDW_SCRATCH1, D_SKL_PLUS, F_CMD_ACCESS, NULL, NULL);
 
@@ -2763,15 +2768,15 @@ static int init_bxt_mmio_info(struct intel_gvt *gvt)
 
 	MMIO_DH(BXT_PORT_PCS_DW12_GRP(DPIO_PHY0, DPIO_CH0), D_BXT,
 		NULL, bxt_pcs_dw12_grp_write);
-	MMIO_DH(BXT_PORT_TX_DW3_LN0(DPIO_PHY0, DPIO_CH0), D_BXT,
+	MMIO_DH(BXT_PORT_TX_DW3_LN(DPIO_PHY0, DPIO_CH0, 0), D_BXT,
 		bxt_port_tx_dw3_read, NULL);
 	MMIO_DH(BXT_PORT_PCS_DW12_GRP(DPIO_PHY0, DPIO_CH1), D_BXT,
 		NULL, bxt_pcs_dw12_grp_write);
-	MMIO_DH(BXT_PORT_TX_DW3_LN0(DPIO_PHY0, DPIO_CH1), D_BXT,
+	MMIO_DH(BXT_PORT_TX_DW3_LN(DPIO_PHY0, DPIO_CH1, 0), D_BXT,
 		bxt_port_tx_dw3_read, NULL);
 	MMIO_DH(BXT_PORT_PCS_DW12_GRP(DPIO_PHY1, DPIO_CH0), D_BXT,
 		NULL, bxt_pcs_dw12_grp_write);
-	MMIO_DH(BXT_PORT_TX_DW3_LN0(DPIO_PHY1, DPIO_CH0), D_BXT,
+	MMIO_DH(BXT_PORT_TX_DW3_LN(DPIO_PHY1, DPIO_CH0, 0), D_BXT,
 		bxt_port_tx_dw3_read, NULL);
 	MMIO_DH(BXT_DE_PLL_ENABLE, D_BXT, NULL, bxt_de_pll_enable_write);
 	MMIO_DFH(GEN8_L3SQCREG1, D_BXT, F_CMD_ACCESS, NULL, NULL);

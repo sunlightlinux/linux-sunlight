@@ -187,7 +187,7 @@ void xe_irq_enable_hwe(struct xe_gt *gt)
 		 * GSCCS interrupts, but it has its own mask register.
 		 */
 		if (xe_hw_engine_mask_per_class(gt, XE_ENGINE_CLASS_OTHER)) {
-			gsc_mask = irqs;
+			gsc_mask = irqs | GSC_ER_COMPLETE;
 			heci_mask = GSC_IRQ_INTF(1);
 		} else if (HAS_HECI_GSCFI(xe)) {
 			gsc_mask = GSC_IRQ_INTF(1);
@@ -326,7 +326,6 @@ static void gt_irq_handler(struct xe_tile *tile,
 					xe_heci_gsc_irq_handler(xe, intr_vec);
 				else
 					gt_other_irq_handler(engine_gt, instance, intr_vec);
-				continue;
 			}
 		}
 	}
@@ -664,7 +663,7 @@ static irq_handler_t xe_irq_handler(struct xe_device *xe)
 		return xelp_irq_handler;
 }
 
-static void irq_uninstall(struct drm_device *drm, void *arg)
+static void irq_uninstall(void *arg)
 {
 	struct xe_device *xe = arg;
 	struct pci_dev *pdev = to_pci_dev(xe->drm.dev);
@@ -724,7 +723,7 @@ int xe_irq_install(struct xe_device *xe)
 
 	xe_irq_postinstall(xe);
 
-	err = drmm_add_action_or_reset(&xe->drm, irq_uninstall, xe);
+	err = devm_add_action_or_reset(xe->drm.dev, irq_uninstall, xe);
 	if (err)
 		goto free_irq_handler;
 
@@ -738,7 +737,7 @@ free_irq_handler:
 
 void xe_irq_shutdown(struct xe_device *xe)
 {
-	irq_uninstall(&xe->drm, xe);
+	irq_uninstall(xe);
 }
 
 void xe_irq_suspend(struct xe_device *xe)
