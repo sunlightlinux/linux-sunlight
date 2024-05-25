@@ -4391,6 +4391,15 @@
 				has a non-standard PCI host bridge.
 		nobios		[X86-32] disallow use of PCI BIOS, only direct
 				hardware access methods are allowed. Use this
+		pci_acs_override =
+				[PCIE] Override missing PCIe ACS support for:
+				downstream
+					All downstream ports - full ACS capabilities
+				multifunction
+					Add multifunction devices - multifunction ACS subset
+				id:nnnn:nnnn
+					Specific device - full ACS capabilities
+					Specified as vid:did (vendor/device ID) in hex
 				if you experience crashes upon bootup and you
 				suspect they are caused by the BIOS.
 		conf1		[X86] Force use of PCI Configuration Access
