@@ -3812,7 +3812,7 @@ static void reweight_eevdf(struct sched_entity *se, u64 avruntime,
 	 */
 	vslice = (s64)(se->deadline - avruntime);
 	vslice = div_s64(vslice * old_weight, weight);
-	se->deadline = avruntime + vslice;
+	se->deadline = min_vruntime(se->deadline, avruntime + vslice);
 }
 
 static void reweight_entity(struct cfs_rq *cfs_rq, struct sched_entity *se,
