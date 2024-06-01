@@ -472,8 +472,6 @@ static int panel_edp_prepare_once(struct panel_edp *p)
 	gpiod_set_value_cansleep(p->enable_gpio, 1);
 	drm_dp_dpcd_set_powered(p->aux, true);
 
-	p->powered_on_time = ktime_get_boottime();
-
 	delay = p->desc->delay.hpd_reliable;
 	if (p->no_hpd)
 		delay = max(delay, p->desc->delay.hpd_absent);
