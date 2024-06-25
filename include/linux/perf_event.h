@@ -786,6 +786,7 @@ struct perf_event {
 	struct irq_work			pending_disable_irq;
 	struct callback_head		pending_task;
 	unsigned int			pending_work;
+	struct rcuwait			pending_work_wait;
 
 	atomic_t			event_limit;
 
@@ -969,12 +970,6 @@ struct perf_event_context {
 	 */
 	local_t				nr_pending;
 };
-
-/*
- * Number of contexts where an event can trigger:
- *	task, softirq, hardirq, nmi.
- */
-#define PERF_NR_CONTEXTS	4
 
 struct perf_cpu_pmu_context {
 	struct perf_event_pmu_context	epc;
