@@ -1429,6 +1429,7 @@ static int input_action_end_bpf(struct sk_buff *skb,
 	 * bpf_prog_run_save_cb().
 	 */
 	local_lock_nested_bh(&seg6_bpf_srh_states.bh_lock);
+	bpf_net_ctx_seg6_state_set();
 	srh_state = this_cpu_ptr(&seg6_bpf_srh_states);
 	srh_state->srh = srh;
 	srh_state->hdrlen = srh->hdrlen << 3;
@@ -1452,6 +1453,7 @@ static int input_action_end_bpf(struct sk_buff *skb,
 
 	if (srh_state->srh && !seg6_bpf_has_valid_srh(skb))
 		goto drop;
+	bpf_net_ctx_seg6_state_clr();
 	local_unlock_nested_bh(&seg6_bpf_srh_states.bh_lock);
 
 	if (ret != BPF_REDIRECT)
@@ -1460,6 +1462,7 @@ static int input_action_end_bpf(struct sk_buff *skb,
 	return dst_input(skb);
 
 drop:
+	bpf_net_ctx_seg6_state_clr();
 	local_unlock_nested_bh(&seg6_bpf_srh_states.bh_lock);
 	kfree_skb(skb);
 	return -EINVAL;

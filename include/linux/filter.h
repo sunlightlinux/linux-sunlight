@@ -739,6 +739,7 @@ struct bpf_nh_params {
 #define BPF_RI_F_CPU_MAP_INIT	BIT(2)
 #define BPF_RI_F_DEV_MAP_INIT	BIT(3)
 #define BPF_RI_F_XSK_MAP_INIT	BIT(4)
+#define BPF_RI_F_SEG6_STATE	BIT(5)
 
 struct bpf_redirect_info {
 	u64 tgt_index;
@@ -854,6 +855,29 @@ static inline void bpf_net_ctx_get_all_used_flush_lists(struct list_head **lh_ma
 	if (IS_ENABLED(CONFIG_XDP_SOCKETS) &&
 	    kern_flags & BPF_RI_F_XSK_MAP_INIT && !list_empty(lh))
 		*lh_xsk = lh;
+}
+
+static inline bool bpf_net_ctx_seg6_state_avail(void)
+{
+	struct bpf_net_context *bpf_net_ctx = bpf_net_ctx_get();
+
+	if (!bpf_net_ctx)
+		return false;
+	return bpf_net_ctx->ri.kern_flags & BPF_RI_F_SEG6_STATE;
+}
+
+static inline void bpf_net_ctx_seg6_state_set(void)
+{
+	struct bpf_net_context *bpf_net_ctx = bpf_net_ctx_get();
+
+	bpf_net_ctx->ri.kern_flags |= BPF_RI_F_SEG6_STATE;
+}
+
+static inline void bpf_net_ctx_seg6_state_clr(void)
+{
+	struct bpf_net_context *bpf_net_ctx = bpf_net_ctx_get();
+
+	bpf_net_ctx->ri.kern_flags &= ~BPF_RI_F_SEG6_STATE;
 }
 
 /* Compute the linear packet data range [data, data_end) which
