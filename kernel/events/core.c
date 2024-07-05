@@ -9729,26 +9729,21 @@ static int __perf_event_overflow(struct perf_event *event,
 		 */
 		bool valid_sample = sample_is_allowed(event, regs);
 		unsigned int pending_id = 1;
+		enum task_work_notify_mode notify_mode;
 
 		if (regs)
 			pending_id = hash32_ptr((void *)instruction_pointer(regs)) ?: 1;
 
+		notify_mode = in_nmi() ? TWA_NMI_CURRENT : TWA_RESUME;
+
 		if (!event->pending_work &&
-		    !task_work_add(current, &event->pending_task, TWA_RESUME)) {
+		    !task_work_add(current, &event->pending_task, notify_mode)) {
 			event->pending_work = pending_id;
 			local_inc(&event->ctx->nr_pending);
 
 			event->pending_addr = 0;
 			if (valid_sample && (data->sample_flags & PERF_SAMPLE_ADDR))
 				event->pending_addr = data->addr;
-			/*
-			 * The NMI path returns directly to userland. The
-			 * irq_work is raised as a dummy interrupt to ensure
-			 * regular return path to user is taken and task_work
-			 * is processed.
-			 */
-			if (in_nmi())
-				irq_work_queue(&event->pending_disable_irq);
 
 		} else if (event->attr.exclude_kernel && valid_sample) {
 			/*
