@@ -1083,14 +1083,14 @@ static int tc_taprio_configure(struct stmmac_priv *priv,
 	if (fpe) {
 		if (!txqpec) {
 			netdev_err(priv->dev, "FPE preempt must not all 0s!\n");
-			mutex_unlock(&priv->plat->est->lock);
+			mutex_unlock(&priv->est_lock);
 			return -EINVAL;
 		}
 
 		/* Check PEC is within TxQ range */
 		if (txqpec & ~txqmask) {
 			netdev_err(priv->dev, "FPE preempt is out-of-bound.\n");
-			mutex_unlock(&priv->plat->est->lock);
+			mutex_unlock(&priv->est_lock);
 			return -EINVAL;
 		}
 
