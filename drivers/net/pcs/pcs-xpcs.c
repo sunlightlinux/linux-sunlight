@@ -1458,7 +1458,7 @@ static int xpcs_init_id(struct dw_xpcs *xpcs)
 	return 0;
 }
 
-static int xpcs_init_iface(struct dw_xpcs *xpcs, phy_interface_t interface)
+static int xpcs_init_iface(struct dw_xpcs *xpcs, phy_interface_t interface, bool skip_reset)
 {
 	const struct dw_xpcs_compat *compat;
 
@@ -1471,11 +1471,20 @@ static int xpcs_init_iface(struct dw_xpcs *xpcs, phy_interface_t interface)
 		return 0;
 	}
 
-	return xpcs_soft_reset(xpcs, compat);
+	if(!skip_reset) {
+		dev_warn(&xpcs->mdiodev->dev, "%s: xpcs reset\n",
+			 __func__);
+		return xpcs_soft_reset(xpcs, compat);
+	} else {
+		dev_warn(&xpcs->mdiodev->dev, "%s: skip xpcs reset\n",
+			 __func__);
+		return 0;
+	}
 }
 
 static struct dw_xpcs *xpcs_create(struct mdio_device *mdiodev,
-				   phy_interface_t interface)
+				   phy_interface_t interface,
+				   bool skip_reset)
 {
 	struct dw_xpcs *xpcs;
 	int ret;
@@ -1492,7 +1501,7 @@ static struct dw_xpcs *xpcs_create(struct mdio_device *mdiodev,
 	if (ret)
 		goto out_clear_clks;
 
-	ret = xpcs_init_iface(xpcs, interface);
+	ret = xpcs_init_iface(xpcs, interface, skip_reset);
 	if (ret)
 		goto out_clear_clks;
 
@@ -1518,7 +1527,8 @@ out_free_data:
  * to the data allocation and MDIO-bus communications.
  */
 struct dw_xpcs *xpcs_create_mdiodev(struct mii_bus *bus, int addr,
-				    phy_interface_t interface)
+				    phy_interface_t interface,
+				    bool skip_reset)
 {
 	struct mdio_device *mdiodev;
 	struct dw_xpcs *xpcs;
@@ -1527,7 +1537,7 @@ struct dw_xpcs *xpcs_create_mdiodev(struct mii_bus *bus, int addr,
 	if (IS_ERR(mdiodev))
 		return ERR_CAST(mdiodev);
 
-	xpcs = xpcs_create(mdiodev, interface);
+	xpcs = xpcs_create(mdiodev, interface, skip_reset);
 
 	/* xpcs_create() has taken a refcount on the mdiodev if it was
 	 * successful. If xpcs_create() fails, this will free the mdio
@@ -1553,7 +1563,8 @@ EXPORT_SYMBOL_GPL(xpcs_create_mdiodev);
  * communications.
  */
 struct dw_xpcs *xpcs_create_fwnode(struct fwnode_handle *fwnode,
-				   phy_interface_t interface)
+				   phy_interface_t interface,
+				   bool skip_reset)
 {
 	struct mdio_device *mdiodev;
 	struct dw_xpcs *xpcs;
@@ -1565,7 +1576,7 @@ struct dw_xpcs *xpcs_create_fwnode(struct fwnode_handle *fwnode,
 	if (!mdiodev)
 		return ERR_PTR(-EPROBE_DEFER);
 
-	xpcs = xpcs_create(mdiodev, interface);
+	xpcs = xpcs_create(mdiodev, interface, skip_reset);
 
 	/* xpcs_create() has taken a refcount on the mdiodev if it was
 	 * successful. If xpcs_create() fails, this will free the mdio
