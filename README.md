@@ -32,6 +32,9 @@ Additional requirements are listed below based on patch type
 - If the patch is a cherry-pick from Linux mainline with no changes at all
     - tag the patch subject with `UPSTREAM:`.
     - add upstream commit information with a `(cherry picked from commit ...)` line
+    - if applicable, prefer to cherry-pick the commit from the corresponding LTS branch.
+    - append new signature tags (e.g. `Bug:`, `Change-Id:`, etc.) at the end to keep the
+      chronological order.
     - Example:
         - if the upstream commit message is
 ```
@@ -126,6 +129,12 @@ a maintainer tree)
         Change-Id: I4caaaa566ea080fa148c5e768bb1a0b6f7201c01
         Signed-off-by: Joe Smith <joe.smith@foo.org>
 ```
+
+- If a patch has been submitted to the community, but rejected, do NOT use the
+  `FROMLIST:` tag to try to hide this fact.  Use the `ANDROID:` or `SUNLIGHT:` tag as
+  described below as this must be considered as an Android/Sunlight-specific submission,
+  not an upstream submission as the community will not accept these changes
+  as-is.
 
 ## Requirements for Android-specific patches: `ANDROID:`
 
