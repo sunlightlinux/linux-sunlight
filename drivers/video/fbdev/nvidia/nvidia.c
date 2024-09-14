@@ -1310,7 +1310,7 @@ static int nvidiafb_probe(struct pci_dev *pd, const struct pci_device_id *ent)
 	Chipset = nvidia_get_chipset(pd, REGS);
 	Architecture = nvidia_get_arch(Chipset);
 	if (Architecture == 0) {
-		printk(KERN_ERR PFX "unknown NV_ARCH\n");
+		printk(KERN_INFO PFX "unknown NV_ARCH\n");
 		goto err_out;
 	}
 
