@@ -1931,7 +1931,7 @@ static int rivafb_probe(struct pci_dev *pd, const struct pci_device_id *ent)
 	printk(KERN_INFO PFX "nVidia device/chipset %X\n",default_par->Chipset);
 
 	if(default_par->riva.Architecture == 0) {
-		printk(KERN_ERR PFX "unknown NV_ARCH\n");
+		printk(KERN_INFO PFX "unknown NV_ARCH\n");
 		ret=-ENODEV;
 		goto err_release_region;
 	}
