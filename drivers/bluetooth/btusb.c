@@ -2606,7 +2606,11 @@ static void btusb_mtk_claim_iso_intf(struct btusb_data *data)
 					 btmtk_data->isopkt_intf, data);
 	if (err < 0) {
 		btmtk_data->isopkt_intf = NULL;
-		bt_dev_err(data->hdev, "Failed to claim iso interface");
+
+		if (data->reset_gpio)
+			gpiod_put(data->reset_gpio);
+
+		bt_dev_warn(data->hdev, "Failed to claim iso interface");
 		return;
 	}
 
