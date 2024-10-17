@@ -312,6 +312,9 @@ struct fuse_args {
 	struct fuse_in_arg in_args[3];
 	struct fuse_arg out_args[2];
 	void (*end)(struct fuse_mount *fm, struct fuse_args *args, int error);
+
+	/* Path used for completing d_canonical_path */
+	struct path *canonical_path;
 };
 
 struct fuse_args_pages {
@@ -769,6 +772,9 @@ struct fuse_conn {
 
 	/** Is bmap not implemented by fs? */
 	unsigned no_bmap:1;
+
+	/** Is dentry_canonical_path not implemented by fs? */
+	unsigned no_dentry_canonical_path:1;
 
 	/** Is poll not implemented by fs? */
 	unsigned no_poll:1;
