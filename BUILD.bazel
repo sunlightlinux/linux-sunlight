@@ -402,7 +402,8 @@ kernel_build(
         "vmlinux",
         "vmlinux.symvers",
     ],
-    build_config = "build.config.microdroid.aarch64",
+    build_config = "build.config.common",
+    defconfig = "arch/arm64/configs/microdroid_defconfig",
     make_goals = [
         "Image",
     ],
@@ -435,7 +436,8 @@ kernel_build(
         "vmlinux",
         "vmlinux.symvers",
     ],
-    build_config = "build.config.microdroid.aarch64",
+    build_config = "build.config.common",
+    defconfig = "arch/arm64/configs/microdroid_defconfig",
     make_goals = [
         "Image",
     ],
@@ -465,7 +467,8 @@ kernel_build(
     srcs = [":kernel_x86_64_sources"],
     outs = X86_64_OUTS,
     arch = "x86_64",
-    build_config = "build.config.microdroid.x86_64",
+    build_config = "build.config.common",
+    defconfig = "arch/x86/configs/microdroid_defconfig",
     make_goals = [
         "bzImage",
     ],
@@ -963,6 +966,7 @@ kernel_build(
         "vmlinux.symvers",
     ],
     build_config = "build.config.rockpi4",
+    defconfig = "arch/arm64/configs/gki_defconfig",
     dtstree = "//common-modules/virtual-device:rockpi4_dts",
     make_goals = [
         "Image",
@@ -971,6 +975,7 @@ kernel_build(
     ],
     makefile = ":Makefile",
     module_outs = get_gki_modules_list("arm64") + get_kunit_modules_list("arm64") + _ROCKPI4_MODULE_OUTS + _ROCKPI4_WATCHDOG_MODULE_OUTS,
+    pre_defconfig_fragments = ["arch/arm64/configs/rockpi4_gki.fragment"],
     visibility = ["//visibility:private"],
 )
 
