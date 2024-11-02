@@ -164,7 +164,6 @@ common_kernel(
     arch = "arm64",
     build_config = ":build.config.gki.aarch64_generated",
     build_gki_artifacts = True,
-    check_defconfig_minimized = True,
     ddk_headers_archive = ":kernel_aarch64_ddk_headers_archive",
     ddk_module_headers = [":all_headers_aarch64"],
     defconfig = "arch/arm64/configs/gki_defconfig",
@@ -198,7 +197,6 @@ common_kernel(
     arch = "arm64",
     build_config = ":build.config.gki.aarch64_generated",
     build_gki_artifacts = True,
-    check_defconfig_minimized = True,
     ddk_headers_archive = ":kernel_aarch64_ddk_headers_archive",
     ddk_module_headers = [":all_headers_aarch64"],
     defconfig = "arch/arm64/configs/gki_defconfig",
@@ -229,7 +227,6 @@ common_kernel(
     outs = DEFAULT_GKI_OUTS,
     arch = "arm64",
     build_config = ":build.config.gki.aarch64_generated",
-    check_defconfig_minimized = True,
     ddk_headers_archive = ":kernel_aarch64_ddk_headers_archive",
     ddk_module_headers = [":all_headers_aarch64"],
     defconfig = "arch/arm64/configs/gki_defconfig",
@@ -274,7 +271,6 @@ common_kernel(
     arch = "x86_64",
     build_config = "build.config.gki.x86_64_generated",
     build_gki_artifacts = True,
-    check_defconfig_minimized = True,
     ddk_module_headers = [":all_headers_x86_64"],
     defconfig = "arch/x86/configs/gki_defconfig",
     extra_dist = [
@@ -402,6 +398,7 @@ kernel_build(
         "vmlinux",
         "vmlinux.symvers",
     ],
+    arch = "arm64",
     build_config = "build.config.common",
     defconfig = "arch/arm64/configs/microdroid_defconfig",
     make_goals = [
@@ -436,6 +433,7 @@ kernel_build(
         "vmlinux",
         "vmlinux.symvers",
     ],
+    arch = "arm64",
     build_config = "build.config.common",
     defconfig = "arch/arm64/configs/microdroid_defconfig",
     make_goals = [
@@ -496,7 +494,9 @@ kernel_build(
     outs = [
         "Image",
     ],
-    build_config = "build.config.crashdump.aarch64",
+    arch = "arm64",
+    build_config = "build.config.common",
+    defconfig = "arch/arm64/configs/crashdump_defconfig",
     make_goals = [
         "Image",
     ],
@@ -523,7 +523,8 @@ kernel_build(
     srcs = [":kernel_x86_64_sources"],
     outs = X86_64_OUTS,
     arch = "x86_64",
-    build_config = "build.config.crashdump.x86_64",
+    build_config = "build.config.common",
+    defconfig = "arch/x86/configs/crashdump_defconfig",
     make_goals = [
         "bzImage",
     ],
@@ -797,9 +798,11 @@ kernel_build(
         "arch/arm64/boot/dts/qcom/sm8650-hdk.dtb",
         "arch/arm64/boot/dts/qcom/sm8650-qrd.dtb",
     ],
+    arch = "arm64",
     # Enable mixed build.
     base_kernel = ":kernel_aarch64",
     build_config = "build.config.db845c",
+    defconfig = "arch/arm64/configs/gki_defconfig",
     make_goals = [
         "modules",
         "qcom/qrb5165-rb5.dtb",
@@ -813,6 +816,7 @@ kernel_build(
     ],
     makefile = ":Makefile",
     module_outs = _DB845C_MODULE_OUTS + _DB845C_WATCHDOG_MODULE_OUTS,
+    pre_defconfig_fragments = ["arch/arm64/configs/db845c_gki.fragment"],
     strip_modules = True,
 )
 
@@ -829,9 +833,11 @@ kernel_build(
         "arch/arm64/boot/dts/qcom/sm8650-hdk.dtb",
         "arch/arm64/boot/dts/qcom/sm8650-qrd.dtb",
     ],
+    arch = "arm64",
     # Enable mixed build.
     base_kernel = ":kernel_aarch64",
     build_config = "build.config.db845c",
+    defconfig = "arch/arm64/configs/gki_defconfig",
     make_goals = [
         "modules",
         "qcom/qrb5165-rb5.dtb",
@@ -845,6 +851,7 @@ kernel_build(
     ],
     makefile = ":Makefile",
     module_outs = _DB845C_MODULE_OUTS,
+    pre_defconfig_fragments = ["arch/arm64/configs/db845c_gki.fragment"],
     strip_modules = True,
 )
 
@@ -965,6 +972,7 @@ kernel_build(
         "vmlinux",
         "vmlinux.symvers",
     ],
+    arch = "arm64",
     build_config = "build.config.rockpi4",
     defconfig = "arch/arm64/configs/gki_defconfig",
     dtstree = "//common-modules/virtual-device:rockpi4_dts",
@@ -992,6 +1000,7 @@ kernel_build(
         "vmlinux",
         "vmlinux.symvers",
     ],
+    arch = "arm64",
     build_config = "build.config.rockpi4",
     dtstree = "//common-modules/virtual-device:rockpi4_dts",
     make_goals = [
@@ -1272,7 +1281,8 @@ kernel_build(
     # Hack to actually check the build.
     # Otherwise, Bazel thinks that there are no output files, and skip building.
     outs = [".config"],
-    build_config = "build.config.allmodconfig.aarch64",
+    arch = "arm64",
+    build_config = "build.config.common",
     defconfig = "//build/kernel/kleaf:allmodconfig",
     make_goals = [
         "Image",
@@ -1291,7 +1301,7 @@ kernel_build(
     # Otherwise, Bazel thinks that there are no output files, and skip building.
     outs = [".config"],
     arch = "x86_64",
-    build_config = "build.config.allmodconfig.x86_64",
+    build_config = "build.config.common",
     defconfig = "//build/kernel/kleaf:allmodconfig",
     make_goals = [
         "bzImage",
@@ -1311,7 +1321,7 @@ kernel_build(
     # Otherwise, Bazel thinks that there are no output files, and skip building.
     outs = [".config"],
     arch = "arm",
-    build_config = "build.config.allmodconfig.arm",
+    build_config = "build.config.common",
     defconfig = "//build/kernel/kleaf:allmodconfig",
     make_goals = [
         "zImage",
@@ -1548,7 +1558,7 @@ filegroup(
 ddk_headers(
     name = "all_headers_unsafe",
     hdrs = [
-        "drivers/gpu/drm/virtio/virtgpu_trace.h",
+        "//build/kernel/kleaf:user_ddk_unsafe_headers",
     ],
     # The list of include directories where source files can #include headers
     # from. In other words, these are the `-I` option to the C compiler.
