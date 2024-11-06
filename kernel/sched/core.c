@@ -99,6 +99,7 @@
 
 #include <trace/hooks/sched.h>
 #include <trace/hooks/cgroup.h>
+#include <linux/sched/bore.h>
 
 EXPORT_TRACEPOINT_SYMBOL_GPL(ipi_send_cpu);
 EXPORT_TRACEPOINT_SYMBOL_GPL(ipi_send_cpumask);
@@ -8490,6 +8491,12 @@ void __init sched_init(void)
 	BUG_ON(!sched_class_above(&fair_sched_class, &ext_sched_class));
 	BUG_ON(!sched_class_above(&ext_sched_class, &idle_sched_class));
 #endif
+
+#ifdef CONFIG_SCHED_BORE
+	printk(KERN_INFO "BORE (Burst-Oriented Response Enhancer) CPU Scheduler modification 5.7.3 by Masahito Suzuki");
+	printk(KERN_INFO "BORE (Burst-Oriented Response Enhancer) CPU Scheduler aligned 5.7.3 by Ionut Nechita");
+	init_task_bore(&init_task);
+#endif // CONFIG_SCHED_BORE
 
 	wait_bit_init();
 
