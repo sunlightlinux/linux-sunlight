@@ -90,6 +90,7 @@ config GKI_HIDDEN_MMC_CONFIGS
 
 config GKI_HIDDEN_GPIO_CONFIGS
 	bool "Hidden GPIO configs needed for GKI"
+	select OF
 	select PINCTRL_SINGLE if (PINCTRL && OF && HAS_IOMEM)
 	select GPIO_PL061 if (HAS_IOMEM && ARM_AMBA && GPIOLIB)
 	select GPIO_SWNODE_UNDEFINED if (X86)
