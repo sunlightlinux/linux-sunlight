@@ -128,6 +128,7 @@ static void reset_task_weights_bore(void) {
 	struct rq *rq;
 	struct rq_flags rf;
 
+	rcu_read_lock();
 	write_lock_irq(&tasklist_lock);
 	for_each_process(task) {
 		if (!task_is_bore_eligible(task)) continue;
@@ -137,6 +138,7 @@ static void reset_task_weights_bore(void) {
 		rq_unlock_irqrestore(rq, &rf);
 	}
 	write_unlock_irq(&tasklist_lock);
+	rcu_read_unlock();
 }
 
 int sched_bore_update_handler(const struct ctl_table *table, int write,
