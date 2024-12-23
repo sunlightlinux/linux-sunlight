@@ -102,6 +102,8 @@
 #include <trace/hooks/cgroup.h>
 #include <trace/hooks/dtask.h>
 
+#include <linux/sched/bore.h>
+
 EXPORT_TRACEPOINT_SYMBOL_GPL(ipi_send_cpu);
 EXPORT_TRACEPOINT_SYMBOL_GPL(ipi_send_cpumask);
 
@@ -9391,6 +9393,10 @@ void __init sched_init(void)
 	BUG_ON(!sched_class_above(&fair_sched_class, &ext_sched_class));
 	BUG_ON(!sched_class_above(&ext_sched_class, &idle_sched_class));
 #endif
+
+#ifdef CONFIG_SCHED_BORE
+	sched_bore_init();
+#endif // CONFIG_SCHED_BORE
 
 	wait_bit_init();
 
