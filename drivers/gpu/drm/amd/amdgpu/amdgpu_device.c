@@ -3704,29 +3704,46 @@ static int amdgpu_device_ip_resume_phase2(struct amdgpu_device *adev)
  *
  * @adev: amdgpu_device pointer
  *
- * Third resume function for hardware IPs.  The list of all the hardware
+ * Third resume function for hardware IPs. The list of all the hardware
  * IPs that make up the asic is walked and the resume callbacks are run for
- * all DCE.  resume puts the hardware into a functional state after a suspend
- * and updates the software state as necessary.  This function is also used
+ * all DCE. Resume puts the hardware into a functional state after a suspend
+ * and updates the software state as necessary. This function is also used
  * for restoring the GPU after a GPU reset.
  *
  * Returns 0 on success, negative error code on failure.
  */
 static int amdgpu_device_ip_resume_phase3(struct amdgpu_device *adev)
 {
-	int i, r;
+        int i, r;
 
-	for (i = 0; i < adev->num_ip_blocks; i++) {
-		if (!adev->ip_blocks[i].status.valid || adev->ip_blocks[i].status.hw)
-			continue;
-		if (adev->ip_blocks[i].version->type == AMD_IP_BLOCK_TYPE_DCE) {
-			r = adev->ip_blocks[i].version->funcs->resume(adev);
-			if (r)
-				return r;
-		}
-	}
+        if (!adev) {
+                DRM_ERROR("Invalid amdgpu device pointer");
+                return -EINVAL;
+        }
 
-	return 0;
+        for (i = 0; i < adev->num_ip_blocks; i++) {
+                if (!adev->ip_blocks[i].status.valid || adev->ip_blocks[i].status.hw)
+                        continue;
+
+                if (adev->ip_blocks[i].version->type == AMD_IP_BLOCK_TYPE_DCE) {
+                        if (!adev->ip_blocks[i].version->funcs ||
+                            !adev->ip_blocks[i].version->funcs->resume) {
+                                DRM_ERROR("Missing resume callback for DCE block %d", i);
+                                return -EINVAL;
+                        }
+
+                        r = adev->ip_blocks[i].version->funcs->resume(adev);
+                        if (r) {
+                                DRM_ERROR("Failed to resume DCE block %d, error %d", i, r);
+                                return r;
+                        }
+
+                        /* Mark hardware as initialized after successful resume */
+                        adev->ip_blocks[i].status.hw = true;
+                }
+        }
+
+        return 0;
 }
 
 /**
