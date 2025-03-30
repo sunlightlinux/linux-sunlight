@@ -6108,6 +6108,7 @@ static void
 place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 {
 	u64 vslice = 0, vruntime = avg_vruntime(cfs_rq);
+	struct sched_entity *curr = cfs_rq->curr;
 	bool update_zero = false;
 	s64 lag = 0;
 
@@ -6123,7 +6124,6 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 	 * EEVDF: placement strategy #1 / #2
 	 */
 	if (sched_feat(PLACE_LAG) && cfs_rq->nr_queued && se->vlag) {
-		struct sched_entity *curr = cfs_rq->curr;
 		long load, weight;
 
 		lag = se->vlag;
@@ -6214,7 +6214,11 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 			update_zero = true;
 	}
 
-	se->vruntime = vruntime - lag;
+	if (sysctl_sched_child_runs_first && curr && curr->vruntime < se->vruntime) {
+		se->vruntime = curr->vruntime;
+	} else {
+		se->vruntime = vruntime - lag;
+	}
 
 	if (update_zero)
 		update_zero_vruntime(cfs_rq, -lag);
