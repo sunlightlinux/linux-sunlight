@@ -5169,6 +5169,7 @@ static void
 place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 {
 	u64 vslice, vruntime = avg_vruntime(cfs_rq);
+	struct sched_entity *curr = cfs_rq->curr;
 	s64 lag = 0;
 
 	if (!se->custom_slice)
@@ -5184,7 +5185,6 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 	 * EEVDF: placement strategy #1 / #2
 	 */
 	if (sched_feat(PLACE_LAG) && cfs_rq->nr_queued && se->vlag) {
-		struct sched_entity *curr = cfs_rq->curr;
 		unsigned long load;
 
 		lag = se->vlag;
@@ -5251,7 +5251,11 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 		lag = div_s64(lag, load);
 	}
 
-	se->vruntime = vruntime - lag;
+	if (sysctl_sched_child_runs_first && curr && curr->vruntime < se->vruntime) {
+		se->vruntime = curr->vruntime;
+	} else {
+		se->vruntime = vruntime - lag;
+	}
 
 	if (se->rel_deadline) {
 		se->deadline += se->vruntime;
