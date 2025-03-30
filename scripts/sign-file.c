@@ -40,6 +40,30 @@
 #endif
 #include "ssl-common.h"
 
+/*
+ * Use CMS if we have openssl-1.0.0 or newer available - otherwise we have to
+ * assume that it's not available and its header file is missing and that we
+ * should use PKCS#7 instead.  Switching to the older PKCS#7 format restricts
+ * the options we have on specifying the X.509 certificate we want.
+ *
+ * Further, older versions of OpenSSL don't support manually adding signers to
+ * the PKCS#7 message so have to accept that we get a certificate included in
+ * the signature message.  Nor do such older versions of OpenSSL support
+ * signing with anything other than SHA1 - so we're stuck with that if such is
+ * the case.
+ */
+#if defined(OPENSSL_NO_CMS) || \
+    ( defined(LIBRESSL_VERSION_NUMBER) \
+    && (LIBRESSL_VERSION_NUMBER < 0x3010000fL) ) || \
+    OPENSSL_VERSION_NUMBER < 0x10000000L
+#define USE_PKCS7
+#endif
+#ifndef USE_PKCS7
+#include <openssl/cms.h>
+#else
+#include <openssl/pkcs7.h>
+#endif
+
 struct module_signature {
 	uint8_t		algo;		/* Public-key crypto algorithm [0] */
 	uint8_t		hash;		/* Digest algorithm [0] */
