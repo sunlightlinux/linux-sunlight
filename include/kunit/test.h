@@ -26,7 +26,6 @@
 #include <linux/spinlock.h>
 #include <linux/string.h>
 #include <linux/types.h>
-#include <linux/android_kabi.h>
 
 #include <asm/rwonce.h>
 #include <asm/sections.h>
@@ -84,8 +83,6 @@ enum kunit_speed {
 /* Holds attributes for each test case and suite */
 struct kunit_attributes {
 	enum kunit_speed speed;
-
-	ANDROID_KABI_RESERVE(1);
 };
 
 /**
@@ -136,8 +133,6 @@ struct kunit_case {
 	enum kunit_status status;
 	char *module_name;
 	struct string_stream *log;
-
-	ANDROID_KABI_RESERVE(1);
 };
 
 static inline char *kunit_status_to_ok_not_ok(enum kunit_status status)
@@ -260,8 +255,6 @@ struct kunit_suite {
 	struct string_stream *log;
 	int suite_init_err;
 	bool is_init;
-
-	ANDROID_KABI_RESERVE(1);
 };
 
 /* Stores an array of suites, end points one past the end */
@@ -311,8 +304,6 @@ struct kunit {
 	char status_comment[KUNIT_STATUS_COMMENT_SIZE];
 	/* Saves the last seen test. Useful to help with faults. */
 	struct kunit_loc last_seen;
-
-	ANDROID_KABI_RESERVE(1);
 };
 
 static inline void kunit_set_failure(struct kunit *test)
@@ -562,9 +553,9 @@ void kunit_cleanup(struct kunit *test);
 void __printf(2, 3) kunit_log_append(struct string_stream *log, const char *fmt, ...);
 
 /**
- * kunit_mark_skipped() - Marks @test_or_suite as skipped
+ * kunit_mark_skipped() - Marks @test as skipped
  *
- * @test_or_suite: The test context object.
+ * @test: The test context object.
  * @fmt:  A printk() style format string.
  *
  * Marks the test as skipped. @fmt is given output as the test status
@@ -572,18 +563,18 @@ void __printf(2, 3) kunit_log_append(struct string_stream *log, const char *fmt,
  *
  * Test execution continues after kunit_mark_skipped() is called.
  */
-#define kunit_mark_skipped(test_or_suite, fmt, ...)			\
+#define kunit_mark_skipped(test, fmt, ...)				\
 	do {								\
-		WRITE_ONCE((test_or_suite)->status, KUNIT_SKIPPED);	\
-		scnprintf((test_or_suite)->status_comment,		\
+		WRITE_ONCE((test)->status, KUNIT_SKIPPED);		\
+		scnprintf((test)->status_comment,			\
 			  KUNIT_STATUS_COMMENT_SIZE,			\
 			  fmt, ##__VA_ARGS__);				\
 	} while (0)
 
 /**
- * kunit_skip() - Marks @test_or_suite as skipped
+ * kunit_skip() - Marks @test as skipped
  *
- * @test_or_suite: The test context object.
+ * @test: The test context object.
  * @fmt:  A printk() style format string.
  *
  * Skips the test. @fmt is given output as the test status
@@ -591,10 +582,10 @@ void __printf(2, 3) kunit_log_append(struct string_stream *log, const char *fmt,
  *
  * Test execution is halted after kunit_skip() is called.
  */
-#define kunit_skip(test_or_suite, fmt, ...)				\
+#define kunit_skip(test, fmt, ...)					\
 	do {								\
-		kunit_mark_skipped((test_or_suite), fmt, ##__VA_ARGS__);\
-		kunit_try_catch_throw(&((test_or_suite)->try_catch));	\
+		kunit_mark_skipped((test), fmt, ##__VA_ARGS__);		\
+		kunit_try_catch_throw(&((test)->try_catch));		\
 	} while (0)
 
 /*
