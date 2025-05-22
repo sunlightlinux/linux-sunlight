@@ -327,8 +327,11 @@ struct mem_cgroup {
  * size of first charge trial.
  * TODO: maybe necessary to use big numbers in big irons or dynamic based of the
  * workload.
+ *
+ * Limited to S8_MAX (127) due to multi-memcg percpu charge cache implementation
+ * which uses signed char for tracking. See mm/memcontrol.c refill_stock().
  */
-#define MEMCG_CHARGE_BATCH 64U
+#define MEMCG_CHARGE_BATCH 127U
 
 extern struct mem_cgroup *root_mem_cgroup;
 
