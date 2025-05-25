@@ -6166,6 +6166,23 @@ restart:
 	BUG(); /* The idle class should always have a runnable task. */
 }
 
+struct task_struct *pick_task(struct rq *rq)
+{
+	const struct sched_class *class;
+	struct task_struct *p;
+
+	rq->dl_server = NULL;
+
+	for_each_active_class(class) {
+		p = class->pick_task(rq);
+		if (p)
+			return p;
+	}
+
+	BUG(); /* The idle class should always have a runnable task. */
+}
+EXPORT_SYMBOL_GPL(pick_task);
+
 #ifdef CONFIG_SCHED_CORE
 static inline bool is_task_rq_idle(struct task_struct *t)
 {
@@ -6183,22 +6200,6 @@ static inline bool cookie_match(struct task_struct *a, struct task_struct *b)
 		return true;
 
 	return a->core_cookie == b->core_cookie;
-}
-
-static inline struct task_struct *pick_task(struct rq *rq)
-{
-	const struct sched_class *class;
-	struct task_struct *p;
-
-	rq->dl_server = NULL;
-
-	for_each_active_class(class) {
-		p = class->pick_task(rq);
-		if (p)
-			return p;
-	}
-
-	BUG(); /* The idle class should always have a runnable task. */
 }
 
 extern void task_vruntime_update(struct rq *rq, struct task_struct *p, bool in_fi);
@@ -10852,7 +10853,6 @@ void sched_mm_cid_after_execve(struct task_struct *t)
 		smp_mb();
 		t->last_mm_cid = t->mm_cid = mm_cid_get(rq, t, mm);
 	}
-	rseq_set_notify_resume(t);
 }
 
 void sched_mm_cid_fork(struct task_struct *t)

@@ -62,6 +62,7 @@ TARGETS += mount
 TARGETS += mount_setattr
 TARGETS += move_mount_set_group
 TARGETS += mqueue
+TARGETS += mseal_system_mappings
 TARGETS += nci
 TARGETS += net
 TARGETS += net/af_unix
@@ -120,6 +121,7 @@ TARGETS += user_events
 TARGETS += vDSO
 TARGETS += mm
 TARGETS += x86
+TARGETS += x86/bugs
 TARGETS += zram
 #Please keep the TARGETS list alphabetically sorted
 # Run "make quicktest=1 run_tests" or

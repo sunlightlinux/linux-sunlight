@@ -47,6 +47,27 @@
 #define DROP_PREV_NODE		11
 #define DID_FILL_FROM_SCAN	12
 
+/*
+ * Returns true if it's a btree we can easily reconstruct, or otherwise won't
+ * cause data loss if it's missing:
+ */
+static bool btree_id_important(enum btree_id btree)
+{
+	if (btree_id_is_alloc(btree))
+		return false;
+
+	switch (btree) {
+	case BTREE_ID_quotas:
+	case BTREE_ID_snapshot_trees:
+	case BTREE_ID_logged_ops:
+	case BTREE_ID_rebalance_work:
+	case BTREE_ID_subvolume_children:
+		return false;
+	default:
+		return true;
+	}
+}
+
 static const char * const bch2_gc_phase_strs[] = {
 #define x(n)	#n,
 	GC_PHASES()
@@ -534,8 +555,10 @@ reconstruct_root:
 			r->error = 0;
 
 			if (!bch2_btree_has_scanned_nodes(c, i)) {
-				mustfix_fsck_err(trans, btree_root_unreadable_and_scan_found_nothing,
-						 "no nodes found for btree %s, continue?", buf.buf);
+				__fsck_err(trans,
+					   FSCK_CAN_FIX|(!btree_id_important(i) ? FSCK_AUTOFIX : 0),
+					   btree_root_unreadable_and_scan_found_nothing,
+					   "no nodes found for btree %s, continue?", buf.buf);
 				bch2_btree_root_alloc_fake_trans(trans, i, 0);
 			} else {
 				bch2_btree_root_alloc_fake_trans(trans, i, 1);
@@ -691,7 +714,7 @@ retry_root:
 		struct btree_iter iter;
 		bch2_trans_node_iter_init(trans, &iter, btree, POS_MIN,
 					  0, bch2_btree_id_root(c, btree)->b->c.level, 0);
-		struct btree *b = bch2_btree_iter_peek_node(&iter);
+		struct btree *b = bch2_btree_iter_peek_node(trans, &iter);
 		ret = PTR_ERR_OR_ZERO(b);
 		if (ret)
 			goto err_root;
@@ -1199,7 +1222,7 @@ int bch2_gc_gens(struct bch_fs *c)
 				BCH_TRANS_COMMIT_no_enospc, ({
 			ca = bch2_dev_iterate(c, ca, k.k->p.inode);
 			if (!ca) {
-				bch2_btree_iter_set_pos(&iter, POS(k.k->p.inode + 1, 0));
+				bch2_btree_iter_set_pos(trans, &iter, POS(k.k->p.inode + 1, 0));
 				continue;
 			}
 			bch2_alloc_write_oldest_gen(trans, ca, &iter, k);

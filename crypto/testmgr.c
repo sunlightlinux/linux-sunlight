@@ -58,9 +58,6 @@ module_param(fuzz_iterations, uint, 0644);
 MODULE_PARM_DESC(fuzz_iterations, "number of fuzz test iterations");
 #endif
 
-/* Multibuffer is unlimited.  Set arbitrary limit for testing. */
-#define MAX_MB_MSGS	16
-
 #ifdef CONFIG_CRYPTO_MANAGER_DISABLE_TESTS
 
 /* a perfect nop */
@@ -302,13 +299,6 @@ struct test_sg_division {
  * @key_offset_relative_to_alignmask: if true, add the algorithm's alignmask to
  *				      the @key_offset
  * @finalization_type: what finalization function to use for hashes
- * @multibuffer: test with multibuffer
- * @multibuffer_index: random number used to generate the message index to use
- *		       for multibuffer.
- * @multibuffer_uneven: test with multibuffer using uneven lengths
- * @multibuffer_lens: random lengths to make chained request uneven
- * @multibuffer_count: random number used to generate the num_msgs parameter
- *		       for multibuffer
  * @nosimd: execute with SIMD disabled?  Requires !CRYPTO_TFM_REQ_MAY_SLEEP.
  *	    This applies to the parts of the operation that aren't controlled
  *	    individually by @nosimd_setkey or @src_divs[].nosimd.
@@ -328,11 +318,6 @@ struct testvec_config {
 	enum finalization_type finalization_type;
 	bool nosimd;
 	bool nosimd_setkey;
-	bool multibuffer;
-	unsigned int multibuffer_index;
-	unsigned int multibuffer_count;
-	bool multibuffer_uneven;
-	unsigned int multibuffer_lens[MAX_MB_MSGS];
 };
 
 #define TESTVEC_CONFIG_NAMELEN	192
@@ -572,7 +557,6 @@ struct test_sglist {
 	char *bufs[XBUFSIZE];
 	struct scatterlist sgl[XBUFSIZE];
 	struct scatterlist sgl_saved[XBUFSIZE];
-	struct scatterlist full_sgl[XBUFSIZE];
 	struct scatterlist *sgl_ptr;
 	unsigned int nents;
 };
@@ -686,11 +670,6 @@ static int build_test_sglist(struct test_sglist *tsgl,
 	sg_mark_end(&tsgl->sgl[tsgl->nents - 1]);
 	tsgl->sgl_ptr = tsgl->sgl;
 	memcpy(tsgl->sgl_saved, tsgl->sgl, tsgl->nents * sizeof(tsgl->sgl[0]));
-
-	sg_init_table(tsgl->full_sgl, XBUFSIZE);
-	for (i = 0; i < XBUFSIZE; i++)
-		sg_set_buf(tsgl->full_sgl, tsgl->bufs[i], PAGE_SIZE * 2);
-
 	return 0;
 }
 
@@ -1167,27 +1146,6 @@ static void generate_random_testvec_config(struct rnd_state *rng,
 		break;
 	}
 
-	if (prandom_bool(rng)) {
-		int i;
-
-		cfg->multibuffer = true;
-		cfg->multibuffer_count = prandom_u32_state(rng);
-		cfg->multibuffer_count %= MAX_MB_MSGS;
-		if (cfg->multibuffer_count++) {
-			cfg->multibuffer_index = prandom_u32_state(rng);
-			cfg->multibuffer_index %= cfg->multibuffer_count;
-		}
-
-		cfg->multibuffer_uneven = prandom_bool(rng);
-		for (i = 0; i < MAX_MB_MSGS; i++)
-			cfg->multibuffer_lens[i] =
-				generate_random_length(rng, PAGE_SIZE * 2 * XBUFSIZE);
-
-		p += scnprintf(p, end - p, " multibuffer(%d/%d%s)",
-			       cfg->multibuffer_index, cfg->multibuffer_count,
-			       cfg->multibuffer_uneven ? "/uneven" : "");
-	}
-
 	if (!(cfg->req_flags & CRYPTO_TFM_REQ_MAY_SLEEP)) {
 		if (prandom_bool(rng)) {
 			cfg->nosimd = true;
@@ -1492,7 +1450,6 @@ static int do_ahash_op(int (*op)(struct ahash_request *req),
 		       struct ahash_request *req,
 		       struct crypto_wait *wait, bool nosimd)
 {
-	struct ahash_request *r2;
 	int err;
 
 	if (nosimd)
@@ -1503,15 +1460,7 @@ static int do_ahash_op(int (*op)(struct ahash_request *req),
 	if (nosimd)
 		crypto_reenable_simd_for_test();
 
-	err = crypto_wait_req(err, wait);
-	if (err)
-		return err;
-
-	list_for_each_entry(r2, &req->base.list, base.list)
-		if (r2->base.err)
-			return r2->base.err;
-
-	return 0;
+	return crypto_wait_req(err, wait);
 }
 
 static int check_nonfinal_ahash_op(const char *op, int err,
@@ -1532,74 +1481,26 @@ static int check_nonfinal_ahash_op(const char *op, int err,
 	return 0;
 }
 
-static void setup_ahash_multibuffer(
-	struct ahash_request *reqs[MAX_MB_MSGS],
-	const struct testvec_config *cfg,
-	struct test_sglist *tsgl)
-{
-	struct scatterlist *sg = tsgl->full_sgl;
-	static u8 trash[HASH_MAX_DIGESTSIZE];
-	struct ahash_request *req = reqs[0];
-	unsigned int num_msgs;
-	unsigned int msg_idx;
-	int i;
-
-	if (!cfg->multibuffer)
-		return;
-
-	num_msgs = cfg->multibuffer_count;
-	if (num_msgs == 1)
-		return;
-
-	msg_idx = cfg->multibuffer_index;
-	for (i = 1; i < num_msgs; i++) {
-		struct ahash_request *r2 = reqs[i];
-		unsigned int nbytes = req->nbytes;
-
-		if (cfg->multibuffer_uneven)
-			nbytes = cfg->multibuffer_lens[i];
-
-		ahash_request_set_callback(r2, req->base.flags, NULL, NULL);
-		ahash_request_set_crypt(r2, sg, trash, nbytes);
-		ahash_request_chain(r2, req);
-	}
-
-	if (msg_idx) {
-		reqs[msg_idx]->src = req->src;
-		reqs[msg_idx]->nbytes = req->nbytes;
-		reqs[msg_idx]->result = req->result;
-		req->src = sg;
-		if (cfg->multibuffer_uneven)
-			req->nbytes = cfg->multibuffer_lens[0];
-		req->result = trash;
-	}
-}
-
 /* Test one hash test vector in one configuration, using the ahash API */
 static int test_ahash_vec_cfg(const struct hash_testvec *vec,
 			      const char *vec_name,
 			      const struct testvec_config *cfg,
-			      struct ahash_request *reqs[MAX_MB_MSGS],
+			      struct ahash_request *req,
 			      struct test_sglist *tsgl,
 			      u8 *hashstate)
 {
-	struct ahash_request *req = reqs[0];
 	struct crypto_ahash *tfm = crypto_ahash_reqtfm(req);
 	const unsigned int digestsize = crypto_ahash_digestsize(tfm);
 	const unsigned int statesize = crypto_ahash_statesize(tfm);
 	const char *driver = crypto_ahash_driver_name(tfm);
 	const u32 req_flags = CRYPTO_TFM_REQ_MAY_BACKLOG | cfg->req_flags;
 	const struct test_sg_division *divs[XBUFSIZE];
-	struct ahash_request *reqi = req;
 	DECLARE_CRYPTO_WAIT(wait);
 	unsigned int i;
 	struct scatterlist *pending_sgl;
 	unsigned int pending_len;
 	u8 result[HASH_MAX_DIGESTSIZE + TESTMGR_POISON_LEN];
 	int err;
-
-	if (cfg->multibuffer)
-		reqi = reqs[cfg->multibuffer_index];
 
 	/* Set the key, if specified */
 	if (vec->ksize) {
@@ -1630,7 +1531,7 @@ static int test_ahash_vec_cfg(const struct hash_testvec *vec,
 
 	/* Do the actual hashing */
 
-	testmgr_poison(reqi->__ctx, crypto_ahash_reqsize(tfm));
+	testmgr_poison(req->__ctx, crypto_ahash_reqsize(tfm));
 	testmgr_poison(result, digestsize + TESTMGR_POISON_LEN);
 
 	if (cfg->finalization_type == FINALIZATION_TYPE_DIGEST ||
@@ -1639,7 +1540,6 @@ static int test_ahash_vec_cfg(const struct hash_testvec *vec,
 		ahash_request_set_callback(req, req_flags, crypto_req_done,
 					   &wait);
 		ahash_request_set_crypt(req, tsgl->sgl, result, vec->psize);
-		setup_ahash_multibuffer(reqs, cfg, tsgl);
 		err = do_ahash_op(crypto_ahash_digest, req, &wait, cfg->nosimd);
 		if (err) {
 			if (err == vec->digest_error)
@@ -1661,7 +1561,6 @@ static int test_ahash_vec_cfg(const struct hash_testvec *vec,
 
 	ahash_request_set_callback(req, req_flags, crypto_req_done, &wait);
 	ahash_request_set_crypt(req, NULL, result, 0);
-	setup_ahash_multibuffer(reqs, cfg, tsgl);
 	err = do_ahash_op(crypto_ahash_init, req, &wait, cfg->nosimd);
 	err = check_nonfinal_ahash_op("init", err, result, digestsize,
 				      driver, vec_name, cfg);
@@ -1678,7 +1577,6 @@ static int test_ahash_vec_cfg(const struct hash_testvec *vec,
 						   crypto_req_done, &wait);
 			ahash_request_set_crypt(req, pending_sgl, result,
 						pending_len);
-			setup_ahash_multibuffer(reqs, cfg, tsgl);
 			err = do_ahash_op(crypto_ahash_update, req, &wait,
 					  divs[i]->nosimd);
 			err = check_nonfinal_ahash_op("update", err,
@@ -1693,7 +1591,7 @@ static int test_ahash_vec_cfg(const struct hash_testvec *vec,
 			/* Test ->export() and ->import() */
 			testmgr_poison(hashstate + statesize,
 				       TESTMGR_POISON_LEN);
-			err = crypto_ahash_export(reqi, hashstate);
+			err = crypto_ahash_export(req, hashstate);
 			err = check_nonfinal_ahash_op("export", err,
 						      result, digestsize,
 						      driver, vec_name, cfg);
@@ -1706,8 +1604,8 @@ static int test_ahash_vec_cfg(const struct hash_testvec *vec,
 				return -EOVERFLOW;
 			}
 
-			testmgr_poison(reqi->__ctx, crypto_ahash_reqsize(tfm));
-			err = crypto_ahash_import(reqi, hashstate);
+			testmgr_poison(req->__ctx, crypto_ahash_reqsize(tfm));
+			err = crypto_ahash_import(req, hashstate);
 			err = check_nonfinal_ahash_op("import", err,
 						      result, digestsize,
 						      driver, vec_name, cfg);
@@ -1721,7 +1619,6 @@ static int test_ahash_vec_cfg(const struct hash_testvec *vec,
 
 	ahash_request_set_callback(req, req_flags, crypto_req_done, &wait);
 	ahash_request_set_crypt(req, pending_sgl, result, pending_len);
-	setup_ahash_multibuffer(reqs, cfg, tsgl);
 	if (cfg->finalization_type == FINALIZATION_TYPE_FINAL) {
 		/* finish with update() and final() */
 		err = do_ahash_op(crypto_ahash_update, req, &wait, cfg->nosimd);
@@ -1753,7 +1650,7 @@ result_ready:
 static int test_hash_vec_cfg(const struct hash_testvec *vec,
 			     const char *vec_name,
 			     const struct testvec_config *cfg,
-			     struct ahash_request *reqs[MAX_MB_MSGS],
+			     struct ahash_request *req,
 			     struct shash_desc *desc,
 			     struct test_sglist *tsgl,
 			     u8 *hashstate)
@@ -1773,12 +1670,11 @@ static int test_hash_vec_cfg(const struct hash_testvec *vec,
 			return err;
 	}
 
-	return test_ahash_vec_cfg(vec, vec_name, cfg, reqs, tsgl, hashstate);
+	return test_ahash_vec_cfg(vec, vec_name, cfg, req, tsgl, hashstate);
 }
 
 static int test_hash_vec(const struct hash_testvec *vec, unsigned int vec_num,
-			 struct ahash_request *reqs[MAX_MB_MSGS],
-			 struct shash_desc *desc,
+			 struct ahash_request *req, struct shash_desc *desc,
 			 struct test_sglist *tsgl, u8 *hashstate)
 {
 	char vec_name[16];
@@ -1790,7 +1686,7 @@ static int test_hash_vec(const struct hash_testvec *vec, unsigned int vec_num,
 	for (i = 0; i < ARRAY_SIZE(default_hash_testvec_configs); i++) {
 		err = test_hash_vec_cfg(vec, vec_name,
 					&default_hash_testvec_configs[i],
-					reqs, desc, tsgl, hashstate);
+					req, desc, tsgl, hashstate);
 		if (err)
 			return err;
 	}
@@ -1807,7 +1703,7 @@ static int test_hash_vec(const struct hash_testvec *vec, unsigned int vec_num,
 			generate_random_testvec_config(&rng, &cfg, cfgname,
 						       sizeof(cfgname));
 			err = test_hash_vec_cfg(vec, vec_name, &cfg,
-						reqs, desc, tsgl, hashstate);
+						req, desc, tsgl, hashstate);
 			if (err)
 				return err;
 			cond_resched();
@@ -1866,12 +1762,11 @@ done:
  */
 static int test_hash_vs_generic_impl(const char *generic_driver,
 				     unsigned int maxkeysize,
-				     struct ahash_request *reqs[MAX_MB_MSGS],
+				     struct ahash_request *req,
 				     struct shash_desc *desc,
 				     struct test_sglist *tsgl,
 				     u8 *hashstate)
 {
-	struct ahash_request *req = reqs[0];
 	struct crypto_ahash *tfm = crypto_ahash_reqtfm(req);
 	const unsigned int digestsize = crypto_ahash_digestsize(tfm);
 	const unsigned int blocksize = crypto_ahash_blocksize(tfm);
@@ -1969,7 +1864,7 @@ static int test_hash_vs_generic_impl(const char *generic_driver,
 					       sizeof(cfgname));
 
 		err = test_hash_vec_cfg(&vec, vec_name, cfg,
-					reqs, desc, tsgl, hashstate);
+					req, desc, tsgl, hashstate);
 		if (err)
 			goto out;
 		cond_resched();
@@ -1987,7 +1882,7 @@ out:
 #else /* !CONFIG_CRYPTO_MANAGER_EXTRA_TESTS */
 static int test_hash_vs_generic_impl(const char *generic_driver,
 				     unsigned int maxkeysize,
-				     struct ahash_request *reqs[MAX_MB_MSGS],
+				     struct ahash_request *req,
 				     struct shash_desc *desc,
 				     struct test_sglist *tsgl,
 				     u8 *hashstate)
@@ -2034,8 +1929,8 @@ static int __alg_test_hash(const struct hash_testvec *vecs,
 			   u32 type, u32 mask,
 			   const char *generic_driver, unsigned int maxkeysize)
 {
-	struct ahash_request *reqs[MAX_MB_MSGS] = {};
 	struct crypto_ahash *atfm = NULL;
+	struct ahash_request *req = NULL;
 	struct crypto_shash *stfm = NULL;
 	struct shash_desc *desc = NULL;
 	struct test_sglist *tsgl = NULL;
@@ -2059,14 +1954,12 @@ static int __alg_test_hash(const struct hash_testvec *vecs,
 	}
 	driver = crypto_ahash_driver_name(atfm);
 
-	for (i = 0; i < MAX_MB_MSGS; i++) {
-		reqs[i] = ahash_request_alloc(atfm, GFP_KERNEL);
-		if (!reqs[i]) {
-			pr_err("alg: hash: failed to allocate request for %s\n",
-			       driver);
-			err = -ENOMEM;
-			goto out;
-		}
+	req = ahash_request_alloc(atfm, GFP_KERNEL);
+	if (!req) {
+		pr_err("alg: hash: failed to allocate request for %s\n",
+		       driver);
+		err = -ENOMEM;
+		goto out;
 	}
 
 	/*
@@ -2102,12 +1995,12 @@ static int __alg_test_hash(const struct hash_testvec *vecs,
 		if (fips_enabled && vecs[i].fips_skip)
 			continue;
 
-		err = test_hash_vec(&vecs[i], i, reqs, desc, tsgl, hashstate);
+		err = test_hash_vec(&vecs[i], i, req, desc, tsgl, hashstate);
 		if (err)
 			goto out;
 		cond_resched();
 	}
-	err = test_hash_vs_generic_impl(generic_driver, maxkeysize, reqs,
+	err = test_hash_vs_generic_impl(generic_driver, maxkeysize, req,
 					desc, tsgl, hashstate);
 out:
 	kfree(hashstate);
@@ -2117,12 +2010,7 @@ out:
 	}
 	kfree(desc);
 	crypto_free_shash(stfm);
-	if (reqs[0]) {
-		ahash_request_set_callback(reqs[0], 0, NULL, NULL);
-		for (i = 1; i < MAX_MB_MSGS && reqs[i]; i++)
-			ahash_request_chain(reqs[i], reqs[0]);
-		ahash_request_free(reqs[0]);
-	}
+	ahash_request_free(req);
 	crypto_free_ahash(atfm);
 	return err;
 }
@@ -3438,48 +3326,27 @@ static int test_acomp(struct crypto_acomp *tfm,
 		      int ctcount, int dtcount)
 {
 	const char *algo = crypto_tfm_alg_driver_name(crypto_acomp_tfm(tfm));
-	struct scatterlist *src = NULL, *dst = NULL;
-	struct acomp_req *reqs[MAX_MB_MSGS] = {};
-	char *decomp_out[MAX_MB_MSGS] = {};
-	char *output[MAX_MB_MSGS] = {};
-	struct crypto_wait wait;
-	struct acomp_req *req;
-	int ret = -ENOMEM;
 	unsigned int i;
+	char *output, *decomp_out;
+	int ret;
+	struct scatterlist src, dst;
+	struct acomp_req *req;
+	struct crypto_wait wait;
 
-	src = kmalloc_array(MAX_MB_MSGS, sizeof(*src), GFP_KERNEL);
-	if (!src)
-		goto out;
-	dst = kmalloc_array(MAX_MB_MSGS, sizeof(*dst), GFP_KERNEL);
-	if (!dst)
-		goto out;
+	output = kmalloc(COMP_BUF_SIZE, GFP_KERNEL);
+	if (!output)
+		return -ENOMEM;
 
-	for (i = 0; i < MAX_MB_MSGS; i++) {
-		reqs[i] = acomp_request_alloc(tfm);
-		if (!reqs[i])
-			goto out;
-
-		acomp_request_set_callback(reqs[i],
-					   CRYPTO_TFM_REQ_MAY_SLEEP |
-					   CRYPTO_TFM_REQ_MAY_BACKLOG,
-					   crypto_req_done, &wait);
-		if (i)
-			acomp_request_chain(reqs[i], reqs[0]);
-
-		output[i] = kmalloc(COMP_BUF_SIZE, GFP_KERNEL);
-		if (!output[i])
-			goto out;
-
-		decomp_out[i] = kmalloc(COMP_BUF_SIZE, GFP_KERNEL);
-		if (!decomp_out[i])
-			goto out;
+	decomp_out = kmalloc(COMP_BUF_SIZE, GFP_KERNEL);
+	if (!decomp_out) {
+		kfree(output);
+		return -ENOMEM;
 	}
 
 	for (i = 0; i < ctcount; i++) {
 		unsigned int dlen = COMP_BUF_SIZE;
 		int ilen = ctemplate[i].inlen;
 		void *input_vec;
-		int j;
 
 		input_vec = kmemdup(ctemplate[i].input, ilen, GFP_KERNEL);
 		if (!input_vec) {
@@ -3487,61 +3354,70 @@ static int test_acomp(struct crypto_acomp *tfm,
 			goto out;
 		}
 
+		memset(output, 0, dlen);
 		crypto_init_wait(&wait);
-		sg_init_one(src, input_vec, ilen);
+		sg_init_one(&src, input_vec, ilen);
+		sg_init_one(&dst, output, dlen);
 
-		for (j = 0; j < MAX_MB_MSGS; j++) {
-			sg_init_one(dst + j, output[j], dlen);
-			acomp_request_set_params(reqs[j], src, dst + j, ilen, dlen);
+		req = acomp_request_alloc(tfm);
+		if (!req) {
+			pr_err("alg: acomp: request alloc failed for %s\n",
+			       algo);
+			kfree(input_vec);
+			ret = -ENOMEM;
+			goto out;
 		}
 
-		req = reqs[0];
+		acomp_request_set_params(req, &src, &dst, ilen, dlen);
+		acomp_request_set_callback(req, CRYPTO_TFM_REQ_MAY_BACKLOG,
+					   crypto_req_done, &wait);
+
 		ret = crypto_wait_req(crypto_acomp_compress(req), &wait);
 		if (ret) {
 			pr_err("alg: acomp: compression failed on test %d for %s: ret=%d\n",
 			       i + 1, algo, -ret);
 			kfree(input_vec);
+			acomp_request_free(req);
 			goto out;
 		}
 
 		ilen = req->dlen;
 		dlen = COMP_BUF_SIZE;
+		sg_init_one(&src, output, ilen);
+		sg_init_one(&dst, decomp_out, dlen);
 		crypto_init_wait(&wait);
-		for (j = 0; j < MAX_MB_MSGS; j++) {
-			sg_init_one(src + j, output[j], ilen);
-			sg_init_one(dst + j, decomp_out[j], dlen);
-			acomp_request_set_params(reqs[j], src + j, dst + j, ilen, dlen);
+		acomp_request_set_params(req, &src, &dst, ilen, dlen);
+
+		ret = crypto_wait_req(crypto_acomp_decompress(req), &wait);
+		if (ret) {
+			pr_err("alg: acomp: compression failed on test %d for %s: ret=%d\n",
+			       i + 1, algo, -ret);
+			kfree(input_vec);
+			acomp_request_free(req);
+			goto out;
 		}
 
-		crypto_wait_req(crypto_acomp_decompress(req), &wait);
-		for (j = 0; j < MAX_MB_MSGS; j++) {
-			ret = reqs[j]->base.err;
-			if (ret) {
-				pr_err("alg: acomp: compression failed on test %d (%d) for %s: ret=%d\n",
-				       i + 1, j, algo, -ret);
-				kfree(input_vec);
-				goto out;
-			}
+		if (req->dlen != ctemplate[i].inlen) {
+			pr_err("alg: acomp: Compression test %d failed for %s: output len = %d\n",
+			       i + 1, algo, req->dlen);
+			ret = -EINVAL;
+			kfree(input_vec);
+			acomp_request_free(req);
+			goto out;
+		}
 
-			if (reqs[j]->dlen != ctemplate[i].inlen) {
-				pr_err("alg: acomp: Compression test %d (%d) failed for %s: output len = %d\n",
-				       i + 1, j, algo, reqs[j]->dlen);
-				ret = -EINVAL;
-				kfree(input_vec);
-				goto out;
-			}
-
-			if (memcmp(input_vec, decomp_out[j], reqs[j]->dlen)) {
-				pr_err("alg: acomp: Compression test %d (%d) failed for %s\n",
-				       i + 1, j, algo);
-				hexdump(output[j], reqs[j]->dlen);
-				ret = -EINVAL;
-				kfree(input_vec);
-				goto out;
-			}
+		if (memcmp(input_vec, decomp_out, req->dlen)) {
+			pr_err("alg: acomp: Compression test %d failed for %s\n",
+			       i + 1, algo);
+			hexdump(output, req->dlen);
+			ret = -EINVAL;
+			kfree(input_vec);
+			acomp_request_free(req);
+			goto out;
 		}
 
 		kfree(input_vec);
+		acomp_request_free(req);
 	}
 
 	for (i = 0; i < dtcount; i++) {
@@ -3555,9 +3431,10 @@ static int test_acomp(struct crypto_acomp *tfm,
 			goto out;
 		}
 
+		memset(output, 0, dlen);
 		crypto_init_wait(&wait);
-		sg_init_one(src, input_vec, ilen);
-		sg_init_one(dst, output[0], dlen);
+		sg_init_one(&src, input_vec, ilen);
+		sg_init_one(&dst, output, dlen);
 
 		req = acomp_request_alloc(tfm);
 		if (!req) {
@@ -3568,7 +3445,7 @@ static int test_acomp(struct crypto_acomp *tfm,
 			goto out;
 		}
 
-		acomp_request_set_params(req, src, dst, ilen, dlen);
+		acomp_request_set_params(req, &src, &dst, ilen, dlen);
 		acomp_request_set_callback(req, CRYPTO_TFM_REQ_MAY_BACKLOG,
 					   crypto_req_done, &wait);
 
@@ -3590,10 +3467,10 @@ static int test_acomp(struct crypto_acomp *tfm,
 			goto out;
 		}
 
-		if (memcmp(output[0], dtemplate[i].output, req->dlen)) {
+		if (memcmp(output, dtemplate[i].output, req->dlen)) {
 			pr_err("alg: acomp: Decompression test %d failed for %s\n",
 			       i + 1, algo);
-			hexdump(output[0], req->dlen);
+			hexdump(output, req->dlen);
 			ret = -EINVAL;
 			kfree(input_vec);
 			acomp_request_free(req);
@@ -3607,13 +3484,8 @@ static int test_acomp(struct crypto_acomp *tfm,
 	ret = 0;
 
 out:
-	acomp_request_free(reqs[0]);
-	for (i = 0; i < MAX_MB_MSGS; i++) {
-		kfree(output[i]);
-		kfree(decomp_out[i]);
-	}
-	kfree(dst);
-	kfree(src);
+	kfree(decomp_out);
+	kfree(output);
 	return ret;
 }
 

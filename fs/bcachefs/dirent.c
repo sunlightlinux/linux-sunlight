@@ -13,8 +13,8 @@
 
 #include <linux/dcache.h>
 
-static int bch2_casefold(struct btree_trans *trans, const struct bch_hash_info *info,
-				const struct qstr *str, struct qstr *out_cf)
+int bch2_casefold(struct btree_trans *trans, const struct bch_hash_info *info,
+		  const struct qstr *str, struct qstr *out_cf)
 {
 	*out_cf = (struct qstr) QSTR_INIT(NULL, 0);
 
@@ -33,18 +33,6 @@ static int bch2_casefold(struct btree_trans *trans, const struct bch_hash_info *
 #else
 	return -EOPNOTSUPP;
 #endif
-}
-
-static inline int bch2_maybe_casefold(struct btree_trans *trans,
-				      const struct bch_hash_info *info,
-				      const struct qstr *str, struct qstr *out_cf)
-{
-	if (likely(!info->cf_encoding)) {
-		*out_cf = *str;
-		return 0;
-	} else {
-		return bch2_casefold(trans, info, str, out_cf);
-	}
 }
 
 static unsigned bch2_dirent_name_bytes(struct bkey_s_c_dirent d)
@@ -287,8 +275,8 @@ static void dirent_init_casefolded_name(struct bkey_i_dirent *dirent,
 	EBUG_ON(!dirent->v.d_casefold);
 	EBUG_ON(!cf_name->len);
 
-	dirent->v.d_cf_name_block.d_name_len = name->len;
-	dirent->v.d_cf_name_block.d_cf_name_len = cf_name->len;
+	dirent->v.d_cf_name_block.d_name_len = cpu_to_le16(name->len);
+	dirent->v.d_cf_name_block.d_cf_name_len = cpu_to_le16(cf_name->len);
 	memcpy(&dirent->v.d_cf_name_block.d_names[0], name->name, name->len);
 	memcpy(&dirent->v.d_cf_name_block.d_names[name->len], cf_name->name, cf_name->len);
 	memset(&dirent->v.d_cf_name_block.d_names[name->len + cf_name->len], 0,
@@ -417,8 +405,8 @@ int bch2_dirent_rename(struct btree_trans *trans,
 		enum bch_rename_mode mode)
 {
 	struct qstr src_name_lookup, dst_name_lookup;
-	struct btree_iter src_iter = { NULL };
-	struct btree_iter dst_iter = { NULL };
+	struct btree_iter src_iter = {};
+	struct btree_iter dst_iter = {};
 	struct bkey_s_c old_src, old_dst = bkey_s_c_null;
 	struct bkey_i_dirent *new_src = NULL, *new_dst = NULL;
 	struct bpos dst_pos =
@@ -586,16 +574,16 @@ out_set_src:
 	}
 
 	if (delete_src) {
-		bch2_btree_iter_set_snapshot(&src_iter, old_src.k->p.snapshot);
-		ret =   bch2_btree_iter_traverse(&src_iter) ?:
+		bch2_btree_iter_set_snapshot(trans, &src_iter, old_src.k->p.snapshot);
+		ret =   bch2_btree_iter_traverse(trans, &src_iter) ?:
 			bch2_btree_delete_at(trans, &src_iter, BTREE_UPDATE_internal_snapshot_node);
 		if (ret)
 			goto out;
 	}
 
 	if (delete_dst) {
-		bch2_btree_iter_set_snapshot(&dst_iter, old_dst.k->p.snapshot);
-		ret =   bch2_btree_iter_traverse(&dst_iter) ?:
+		bch2_btree_iter_set_snapshot(trans, &dst_iter, old_dst.k->p.snapshot);
+		ret =   bch2_btree_iter_traverse(trans, &dst_iter) ?:
 			bch2_btree_delete_at(trans, &dst_iter, BTREE_UPDATE_internal_snapshot_node);
 		if (ret)
 			goto out;
@@ -642,7 +630,7 @@ u64 bch2_dirent_lookup(struct bch_fs *c, subvol_inum dir,
 		       const struct qstr *name, subvol_inum *inum)
 {
 	struct btree_trans *trans = bch2_trans_get(c);
-	struct btree_iter iter = { NULL };
+	struct btree_iter iter = {};
 
 	int ret = lockrestart_do(trans,
 		bch2_dirent_lookup_trans(trans, &iter, dir, hash_info, name, inum, 0));
@@ -697,7 +685,7 @@ static int bch2_dir_emit(struct dir_context *ctx, struct bkey_s_c_dirent d, subv
 		      vfs_d_type(d.v->d_type));
 	if (ret)
 		ctx->pos = d.k->p.offset + 1;
-	return ret;
+	return !ret;
 }
 
 int bch2_readdir(struct bch_fs *c, subvol_inum inum, struct dir_context *ctx)
@@ -722,7 +710,7 @@ int bch2_readdir(struct bch_fs *c, subvol_inum inum, struct dir_context *ctx)
 			if (ret2 > 0)
 				continue;
 
-			ret2 ?: drop_locks_do(trans, bch2_dir_emit(ctx, dirent, target));
+			ret2 ?: (bch2_trans_unlock(trans), bch2_dir_emit(ctx, dirent, target));
 		})));
 
 	bch2_bkey_buf_exit(&sk, c);
@@ -771,7 +759,7 @@ int bch2_fsck_remove_dirent(struct btree_trans *trans, struct bpos pos)
 
 	bch2_trans_iter_init(trans, &iter, BTREE_ID_dirents, pos, BTREE_ITER_intent);
 
-	ret =   bch2_btree_iter_traverse(&iter) ?:
+	ret =   bch2_btree_iter_traverse(trans, &iter) ?:
 		bch2_hash_delete_at(trans, bch2_dirent_hash_desc,
 				    &dir_hash_info, &iter,
 				    BTREE_UPDATE_internal_snapshot_node);

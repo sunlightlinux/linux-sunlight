@@ -376,6 +376,19 @@ int bch2_accounting_mem_insert(struct bch_fs *c, struct bkey_s_c_accounting a,
 	return ret;
 }
 
+int bch2_accounting_mem_insert_locked(struct bch_fs *c, struct bkey_s_c_accounting a,
+			       enum bch_accounting_mode mode)
+{
+	struct bch_replicas_padded r;
+
+	if (mode != BCH_ACCOUNTING_read &&
+	    accounting_to_replicas(&r.e, a.k->p) &&
+	    !bch2_replicas_marked_locked(c, &r.e))
+		return -BCH_ERR_btree_insert_need_mark_replicas;
+
+	return __bch2_accounting_mem_insert(c, a);
+}
+
 static bool accounting_mem_entry_is_zero(struct accounting_mem_entry *e)
 {
 	for (unsigned i = 0; i < e->nr_counters; i++)
@@ -583,7 +596,7 @@ int bch2_gc_accounting_done(struct bch_fs *c)
 					accounting_key_init(&k_i.k, &acc_k, src_v, nr);
 					bch2_accounting_mem_mod_locked(trans,
 								bkey_i_to_s_c_accounting(&k_i.k),
-								BCH_ACCOUNTING_normal);
+								BCH_ACCOUNTING_normal, true);
 
 					preempt_disable();
 					struct bch_fs_usage_base *dst = this_cpu_ptr(c->usage);
@@ -612,7 +625,7 @@ static int accounting_read_key(struct btree_trans *trans, struct bkey_s_c k)
 
 	percpu_down_read(&c->mark_lock);
 	int ret = bch2_accounting_mem_mod_locked(trans, bkey_s_c_to_accounting(k),
-						 BCH_ACCOUNTING_read);
+						 BCH_ACCOUNTING_read, false);
 	percpu_up_read(&c->mark_lock);
 	return ret;
 }
@@ -739,7 +752,7 @@ int bch2_accounting_read(struct bch_fs *c)
 				struct disk_accounting_pos next;
 				memset(&next, 0, sizeof(next));
 				next.type = acc_k.type + 1;
-				bch2_btree_iter_set_pos(&iter, disk_accounting_pos_to_bpos(&next));
+				bch2_btree_iter_set_pos(trans, &iter, disk_accounting_pos_to_bpos(&next));
 				continue;
 			}
 
@@ -930,7 +943,7 @@ void bch2_verify_accounting_clean(struct bch_fs *c)
 				struct disk_accounting_pos next;
 				memset(&next, 0, sizeof(next));
 				next.type = acc_k.type + 1;
-				bch2_btree_iter_set_pos(&iter, disk_accounting_pos_to_bpos(&next));
+				bch2_btree_iter_set_pos(trans, &iter, disk_accounting_pos_to_bpos(&next));
 				continue;
 			}
 

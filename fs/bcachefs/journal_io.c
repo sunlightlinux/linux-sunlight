@@ -19,6 +19,7 @@
 
 #include <linux/ioprio.h>
 #include <linux/string_choices.h>
+#include <linux/sched/sysctl.h>
 
 void bch2_journal_pos_from_member_info_set(struct bch_fs *c)
 {
@@ -1218,7 +1219,7 @@ static CLOSURE_CALLBACK(bch2_journal_read_device)
 out:
 	bch_verbose(c, "journal read done on device %s, ret %i", ca->name, ret);
 	kvfree(buf.data);
-	percpu_ref_put(&ca->io_ref);
+	percpu_ref_put(&ca->io_ref[READ]);
 	closure_return(cl);
 	return;
 err:
@@ -1253,7 +1254,7 @@ int bch2_journal_read(struct bch_fs *c,
 
 		if ((ca->mi.state == BCH_MEMBER_STATE_rw ||
 		     ca->mi.state == BCH_MEMBER_STATE_ro) &&
-		    percpu_ref_tryget(&ca->io_ref))
+		    percpu_ref_tryget(&ca->io_ref[READ]))
 			closure_call(&ca->journal.read,
 				     bch2_journal_read_device,
 				     system_unbound_wq,
@@ -1262,7 +1263,8 @@ int bch2_journal_read(struct bch_fs *c,
 			degraded = true;
 	}
 
-	closure_sync(&jlist.cl);
+	while (closure_sync_timeout(&jlist.cl, sysctl_hung_task_timeout_secs * HZ / 2))
+		;
 
 	if (jlist.ret)
 		return jlist.ret;
@@ -1460,7 +1462,7 @@ fsck_err:
 
 static void journal_advance_devs_to_next_bucket(struct journal *j,
 						struct dev_alloc_list *devs,
-						unsigned sectors, u64 seq)
+						unsigned sectors, __le64 seq)
 {
 	struct bch_fs *c = container_of(j, struct bch_fs, journal);
 
@@ -1768,7 +1770,7 @@ static void journal_write_endio(struct bio *bio)
 	}
 
 	closure_put(&w->io);
-	percpu_ref_put(&ca->io_ref);
+	percpu_ref_put(&ca->io_ref[WRITE]);
 }
 
 static CLOSURE_CALLBACK(journal_write_submit)
@@ -1782,7 +1784,7 @@ static CLOSURE_CALLBACK(journal_write_submit)
 		struct bch_dev *ca = bch2_dev_get_ioref(c, ptr->dev, WRITE);
 		if (!ca) {
 			/* XXX: fix this */
-			bch_err(c, "missing device for journal write\n");
+			bch_err(c, "missing device %u for journal write", ptr->dev);
 			continue;
 		}
 
@@ -1843,7 +1845,7 @@ static CLOSURE_CALLBACK(journal_write_preflush)
 
 	if (w->separate_flush) {
 		for_each_rw_member(c, ca) {
-			percpu_ref_get(&ca->io_ref);
+			percpu_ref_get(&ca->io_ref[WRITE]);
 
 			struct journal_device *ja = &ca->journal;
 			struct bio *bio = &ja->bio[w->idx]->bio;

@@ -73,13 +73,29 @@ int bch2_set_version_incompat(struct bch_fs *c, enum bcachefs_metadata_version v
 		? 0
 		: -BCH_ERR_may_not_use_incompat_feature;
 
+	mutex_lock(&c->sb_lock);
 	if (!ret) {
-		mutex_lock(&c->sb_lock);
 		SET_BCH_SB_VERSION_INCOMPAT(c->disk_sb.sb,
 			max(BCH_SB_VERSION_INCOMPAT(c->disk_sb.sb), version));
 		bch2_write_super(c);
-		mutex_unlock(&c->sb_lock);
+	} else {
+		darray_for_each(c->incompat_versions_requested, i)
+			if (version == *i)
+				goto out;
+
+		darray_push(&c->incompat_versions_requested, version);
+		struct printbuf buf = PRINTBUF;
+		prt_str(&buf, "requested incompat feature ");
+		bch2_version_to_text(&buf, version);
+		prt_str(&buf, " currently not enabled");
+		prt_printf(&buf, "\n  set version_upgrade=incompat to enable");
+
+		bch_notice(c, "%s", buf.buf);
+		printbuf_exit(&buf);
 	}
+
+out:
+	mutex_unlock(&c->sb_lock);
 
 	return ret;
 }
@@ -248,7 +264,7 @@ struct bch_sb_field *bch2_sb_field_resize_id(struct bch_sb_handle *sb,
 			struct bch_sb_handle *dev_sb = &ca->disk_sb;
 
 			if (bch2_sb_realloc(dev_sb, le32_to_cpu(dev_sb->sb->u64s) + d)) {
-				percpu_ref_put(&ca->io_ref);
+				percpu_ref_put(&ca->io_ref[READ]);
 				return NULL;
 			}
 		}
@@ -945,7 +961,7 @@ static void write_super_endio(struct bio *bio)
 	}
 
 	closure_put(&ca->fs->sb_write);
-	percpu_ref_put(&ca->io_ref);
+	percpu_ref_put(&ca->io_ref[READ]);
 }
 
 static void read_back_super(struct bch_fs *c, struct bch_dev *ca)
@@ -963,7 +979,7 @@ static void read_back_super(struct bch_fs *c, struct bch_dev *ca)
 
 	this_cpu_add(ca->io_done->sectors[READ][BCH_DATA_sb], bio_sectors(bio));
 
-	percpu_ref_get(&ca->io_ref);
+	percpu_ref_get(&ca->io_ref[READ]);
 	closure_bio_submit(bio, &c->sb_write);
 }
 
@@ -989,7 +1005,7 @@ static void write_one_super(struct bch_fs *c, struct bch_dev *ca, unsigned idx)
 	this_cpu_add(ca->io_done->sectors[WRITE][BCH_DATA_sb],
 		     bio_sectors(bio));
 
-	percpu_ref_get(&ca->io_ref);
+	percpu_ref_get(&ca->io_ref[READ]);
 	closure_bio_submit(bio, &c->sb_write);
 }
 
@@ -1014,13 +1030,20 @@ int bch2_write_super(struct bch_fs *c)
 	closure_init_stack(cl);
 	memset(&sb_written, 0, sizeof(sb_written));
 
+	/*
+	 * Note: we do writes to RO devices here, and we might want to change
+	 * that in the future.
+	 *
+	 * For now, we expect to be able to call write_super() when we're not
+	 * yet RW:
+	 */
 	for_each_online_member(c, ca) {
 		ret = darray_push(&online_devices, ca);
 		if (bch2_fs_fatal_err_on(ret, c, "%s: error allocating online devices", __func__)) {
-			percpu_ref_put(&ca->io_ref);
+			percpu_ref_put(&ca->io_ref[READ]);
 			goto out;
 		}
-		percpu_ref_get(&ca->io_ref);
+		percpu_ref_get(&ca->io_ref[READ]);
 	}
 
 	/* Make sure we're using the new magic numbers: */
@@ -1079,7 +1102,8 @@ int bch2_write_super(struct bch_fs *c)
 		prt_str(&buf, ")");
 		bch2_fs_fatal_error(c, ": %s", buf.buf);
 		printbuf_exit(&buf);
-		return -BCH_ERR_sb_not_downgraded;
+		ret = -BCH_ERR_sb_not_downgraded;
+		goto out;
 	}
 
 	darray_for_each(online_devices, ca) {
@@ -1186,7 +1210,7 @@ out:
 	/* Make new options visible after they're persistent: */
 	bch2_sb_update(c);
 	darray_for_each(online_devices, ca)
-		percpu_ref_put(&(*ca)->io_ref);
+		percpu_ref_put(&(*ca)->io_ref[READ]);
 	darray_exit(&online_devices);
 	printbuf_exit(&err);
 	return ret;

@@ -61,6 +61,8 @@
 
 #include "time/posix-timers.h"
 
+#undef CREATE_TRACE_POINTS
+#include <trace/hooks/signal.h>
 /*
  * SLAB caches for signal bits.
  */
@@ -176,9 +178,10 @@ static bool recalc_sigpending_tsk(struct task_struct *t)
 
 void recalc_sigpending(void)
 {
-	if (!recalc_sigpending_tsk(current) && !freezing(current))
-		clear_thread_flag(TIF_SIGPENDING);
-
+	if (!recalc_sigpending_tsk(current) && !freezing(current)) {
+		if (unlikely(test_thread_flag(TIF_SIGPENDING)))
+			clear_thread_flag(TIF_SIGPENDING);
+	}
 }
 EXPORT_SYMBOL(recalc_sigpending);
 
@@ -1263,7 +1266,7 @@ int do_send_sig_info(int sig, struct kernel_siginfo *info, struct task_struct *p
 {
 	unsigned long flags;
 	int ret = -ESRCH;
-
+	trace_android_vh_do_send_sig_info(sig, current, p);
 	if (lock_task_sighand(p, &flags)) {
 		ret = send_signal_locked(sig, info, p, type);
 		unlock_task_sighand(p, &flags);
@@ -2179,11 +2182,9 @@ bool do_notify_parent(struct task_struct *tsk, int sig)
 
 	WARN_ON_ONCE(!tsk->ptrace &&
 	       (tsk->group_leader != tsk || !thread_group_empty(tsk)));
-	/*
-	 * Notify for thread-group leaders without subthreads.
-	 */
-	if (thread_group_empty(tsk))
-		do_notify_pidfd(tsk);
+
+	/* ptraced, or group-leader without sub-threads */
+	do_notify_pidfd(tsk);
 
 	if (sig != SIGCHLD) {
 		/*

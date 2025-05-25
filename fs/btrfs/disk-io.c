@@ -1564,7 +1564,7 @@ static int transaction_kthread(void *arg)
 
 	do {
 		cannot_commit = false;
-		delay = msecs_to_jiffies(fs_info->commit_interval * 1000);
+		delay = secs_to_jiffies(fs_info->commit_interval);
 		mutex_lock(&fs_info->transaction_kthread_mutex);
 
 		spin_lock(&fs_info->trans_lock);
@@ -1579,9 +1579,9 @@ static int transaction_kthread(void *arg)
 		    cur->state < TRANS_STATE_COMMIT_PREP &&
 		    delta < fs_info->commit_interval) {
 			spin_unlock(&fs_info->trans_lock);
-			delay -= msecs_to_jiffies((delta - 1) * 1000);
+			delay -= secs_to_jiffies(delta - 1);
 			delay = min(delay,
-				    msecs_to_jiffies(fs_info->commit_interval * 1000));
+				    secs_to_jiffies(fs_info->commit_interval));
 			goto sleep;
 		}
 		transid = cur->transid;
@@ -3853,7 +3853,6 @@ static int write_dev_supers(struct btrfs_device *device,
 			atomic_inc(&device->sb_write_errors);
 			continue;
 		}
-		ASSERT(folio_order(folio) == 0);
 
 		offset = offset_in_folio(folio, bytenr);
 		disk_super = folio_address(folio) + offset;
@@ -3926,7 +3925,6 @@ static int wait_dev_supers(struct btrfs_device *device, int max_mirrors)
 		/* If the folio has been removed, then we know it completed. */
 		if (IS_ERR(folio))
 			continue;
-		ASSERT(folio_order(folio) == 0);
 
 		/* Folio will be unlocked once the write completes. */
 		folio_wait_locked(folio);

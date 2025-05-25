@@ -66,6 +66,12 @@ _GKI_X86_64_BOOT_IMAGE_SIZES = {
     "": "67108864",
 }
 
+# Extra generated headers below $OUT_DIR for external modules.
+_GENERATED_HEADERS_FOR_MODULE = [
+    "security/selinux/flask.h",
+    "security/selinux/av_permissions.h",
+]
+
 checkpatch(
     name = "checkpatch",
     checkpatch_pl = "scripts/checkpatch.pl",
@@ -206,6 +212,7 @@ common_kernel(
         ":test_mappings_zip",
         ":tests_zip_arm64",
     ],
+    generated_headers_for_module = _GENERATED_HEADERS_FOR_MODULE,
     gki_boot_img_sizes = _GKI_AARCH64_BOOT_IMAGE_SIZES,
     gki_system_dlkm_modules = ":gki_system_dlkm_modules_arm64",
     kcflags = COMMON_KCFLAGS,
@@ -240,6 +247,7 @@ common_kernel(
         ":test_mappings_zip",
         ":tests_zip_arm64",
     ],
+    generated_headers_for_module = _GENERATED_HEADERS_FOR_MODULE,
     gki_boot_img_sizes = _GKI_AARCH64_BOOT_IMAGE_SIZES,
     gki_system_dlkm_modules = ":gki_system_dlkm_modules_arm64",
     kcflags = COMMON_KCFLAGS,
@@ -280,6 +288,7 @@ common_kernel(
         ":test_mappings_zip",
         ":tests_zip_x86_64",
     ],
+    generated_headers_for_module = _GENERATED_HEADERS_FOR_MODULE,
     gki_boot_img_sizes = _GKI_X86_64_BOOT_IMAGE_SIZES,
     gki_system_dlkm_modules = ":gki_system_dlkm_modules_x86_64",
     kcflags = COMMON_KCFLAGS,
@@ -798,7 +807,6 @@ kernel_build(
     arch = "arm64",
     # Enable mixed build.
     base_kernel = ":kernel_aarch64",
-    build_config = "build.config.db845c",
     defconfig = "arch/arm64/configs/gki_defconfig",
     make_goals = [
         "modules",
@@ -833,7 +841,6 @@ kernel_build(
     arch = "arm64",
     # Enable mixed build.
     base_kernel = ":kernel_aarch64",
-    build_config = "build.config.db845c",
     defconfig = "arch/arm64/configs/gki_defconfig",
     make_goals = [
         "modules",
@@ -887,6 +894,7 @@ pkg_files(
         ":kernel_aarch64",
         ":kernel_aarch64_modules",
         ":kernel_aarch64_additional_artifacts",
+        ":tests_zip_arm64",
     ],
     strip_prefix = strip_prefix.files_only(),
     visibility = ["//visibility:private"],
@@ -1501,14 +1509,19 @@ ddk_headers(
 ddk_headers(
     name = "all_headers_allowlist_aarch64",
     hdrs = [
+        "drivers/extcon/extcon.h",
+        "drivers/pci/controller/dwc/pcie-designware.h",
+        "drivers/pci/pci.h",
         "drivers/thermal/thermal_core.h",
         "drivers/thermal/thermal_debugfs.h",
         "drivers/thermal/thermal_netlink.h",
         "drivers/thermal/thermal_thresholds.h",
+        "drivers/usb/dwc3/core.h",
         "sound/usb/card.h",
         "sound/usb/usbaudio.h",
         ":all_headers_allowlist_aarch64_globs",
         ":all_headers_allowlist_common_globs",
+        ":all_headers_allowlist_exynos",
         ":xhci_headers",
     ],
     # The list of include directories where source files can #include headers
@@ -1517,7 +1530,11 @@ ddk_headers(
     linux_includes = [
         "arch/arm64/include",
         "arch/arm64/include/uapi",
+        "drivers/extcon",
+        "drivers/pci",
+        "drivers/pci/controller/dwc",
         "drivers/thermal",
+        "drivers/usb",
         "sound/usb",
         "include",
         "include/uapi",
@@ -1611,6 +1628,24 @@ ddk_headers(
     # Unsafe include directories are appended to ccflags-y.
     includes = [
         ".",
+    ],
+    visibility = ["//visibility:private"],
+)
+
+ddk_headers(
+    name = "all_headers_allowlist_exynos",
+    hdrs = [
+        "drivers/android/binder_alloc.h",
+        "drivers/android/binder_internal.h",
+        "drivers/android/binder_trace.h",
+        "drivers/android/dbitmap.h",
+        "kernel/sched/cpudeadline.h",
+        "kernel/sched/cpupri.h",
+        "kernel/sched/ext.h",
+        "kernel/sched/features.h",
+        "kernel/sched/sched.h",
+        "kernel/sched/stats.h",
+        "kernel/workqueue_internal.h",
     ],
     visibility = ["//visibility:private"],
 )

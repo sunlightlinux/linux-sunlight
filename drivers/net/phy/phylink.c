@@ -81,6 +81,7 @@ struct phylink {
 	unsigned int pcs_state;
 
 	bool link_failed;
+	bool suspend_link_up;
 	bool major_config_failed;
 	bool mac_supports_eee_ops;
 	bool mac_supports_eee;
@@ -952,7 +953,7 @@ static unsigned int phylink_inband_caps(struct phylink *pl,
 static void phylink_pcs_poll_stop(struct phylink *pl)
 {
 	if (pl->cfg_link_an_mode == MLO_AN_INBAND)
-		del_timer(&pl->link_poll);
+		timer_delete(&pl->link_poll);
 }
 
 static void phylink_pcs_poll_start(struct phylink *pl)
@@ -2448,7 +2449,7 @@ void phylink_stop(struct phylink *pl)
 		sfp_upstream_stop(pl->sfp_bus);
 	if (pl->phydev)
 		phy_stop(pl->phydev);
-	del_timer_sync(&pl->link_poll);
+	timer_delete_sync(&pl->link_poll);
 	if (pl->link_irq) {
 		free_irq(pl->link_irq, pl);
 		pl->link_irq = 0;
@@ -2545,14 +2546,16 @@ void phylink_suspend(struct phylink *pl, bool mac_wol)
 		/* Stop the resolver bringing the link up */
 		__set_bit(PHYLINK_DISABLE_MAC_WOL, &pl->phylink_disable_state);
 
-		/* Disable the carrier, to prevent transmit timeouts,
-		 * but one would hope all packets have been sent. This
-		 * also means phylink_resolve() will do nothing.
-		 */
-		if (pl->netdev)
-			netif_carrier_off(pl->netdev);
-		else
+		pl->suspend_link_up = phylink_link_is_up(pl);
+		if (pl->suspend_link_up) {
+			/* Disable the carrier, to prevent transmit timeouts,
+			 * but one would hope all packets have been sent. This
+			 * also means phylink_resolve() will do nothing.
+			 */
+			if (pl->netdev)
+				netif_carrier_off(pl->netdev);
 			pl->old_link_state = false;
+		}
 
 		/* We do not call mac_link_down() here as we want the
 		 * link to remain up to receive the WoL packets.
@@ -2603,15 +2606,18 @@ void phylink_resume(struct phylink *pl)
 	if (test_bit(PHYLINK_DISABLE_MAC_WOL, &pl->phylink_disable_state)) {
 		/* Wake-on-Lan enabled, MAC handling */
 
-		/* Call mac_link_down() so we keep the overall state balanced.
-		 * Do this under the state_mutex lock for consistency. This
-		 * will cause a "Link Down" message to be printed during
-		 * resume, which is harmless - the true link state will be
-		 * printed when we run a resolve.
-		 */
-		mutex_lock(&pl->state_mutex);
-		phylink_link_down(pl);
-		mutex_unlock(&pl->state_mutex);
+		if (pl->suspend_link_up) {
+			/* Call mac_link_down() so we keep the overall state
+			 * balanced. Do this under the state_mutex lock for
+			 * consistency. This will cause a "Link Down" message
+			 * to be printed during resume, which is harmless -
+			 * the true link state will be printed when we run a
+			 * resolve.
+			 */
+			mutex_lock(&pl->state_mutex);
+			phylink_link_down(pl);
+			mutex_unlock(&pl->state_mutex);
+		}
 
 		/* Re-apply the link parameters so that all the settings get
 		 * restored to the MAC.

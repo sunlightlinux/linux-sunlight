@@ -1525,16 +1525,10 @@ void netdev_features_change(struct net_device *dev)
 }
 EXPORT_SYMBOL(netdev_features_change);
 
-/**
- *	netdev_state_change - device changes state
- *	@dev: device to cause notification
- *
- *	Called to indicate a device has changed state. This function calls
- *	the notifier chains for netdev_chain and sends a NEWLINK message
- *	to the routing socket.
- */
-void netdev_state_change(struct net_device *dev)
+void netif_state_change(struct net_device *dev)
 {
+	netdev_ops_assert_locked_or_invisible(dev);
+
 	if (dev->flags & IFF_UP) {
 		struct netdev_notifier_change_info change_info = {
 			.info.dev = dev,
@@ -1545,7 +1539,6 @@ void netdev_state_change(struct net_device *dev)
 		rtmsg_ifinfo(RTM_NEWLINK, dev, 0, GFP_KERNEL, 0, NULL);
 	}
 }
-EXPORT_SYMBOL(netdev_state_change);
 
 /**
  * __netdev_notify_peers - notify network peers about existence of @dev,
@@ -1778,6 +1771,7 @@ void netif_disable_lro(struct net_device *dev)
 		netdev_unlock_ops(lower_dev);
 	}
 }
+EXPORT_IPV6_MOD(netif_disable_lro);
 
 /**
  *	dev_disable_gro_hw - disable HW Generic Receive Offload on a device
@@ -1865,7 +1859,9 @@ static int call_netdevice_register_net_notifiers(struct notifier_block *nb,
 	int err;
 
 	for_each_netdev(net, dev) {
+		netdev_lock_ops(dev);
 		err = call_netdevice_register_notifiers(nb, dev);
+		netdev_unlock_ops(dev);
 		if (err)
 			goto rollback;
 	}
@@ -9204,18 +9200,7 @@ static int __dev_set_promiscuity(struct net_device *dev, int inc, bool notify)
 	return 0;
 }
 
-/**
- *	dev_set_promiscuity	- update promiscuity count on a device
- *	@dev: device
- *	@inc: modifier
- *
- *	Add or remove promiscuity from a device. While the count in the device
- *	remains above zero the interface remains promiscuous. Once it hits zero
- *	the device reverts back to normal filtering operation. A negative inc
- *	value is used to drop promiscuity on the device.
- *	Return 0 if successful or a negative errno code on error.
- */
-int dev_set_promiscuity(struct net_device *dev, int inc)
+int netif_set_promiscuity(struct net_device *dev, int inc)
 {
 	unsigned int old_flags = dev->flags;
 	int err;
@@ -9227,7 +9212,6 @@ int dev_set_promiscuity(struct net_device *dev, int inc)
 		dev_set_rx_mode(dev);
 	return err;
 }
-EXPORT_SYMBOL(dev_set_promiscuity);
 
 int netif_set_allmulti(struct net_device *dev, int inc, bool notify)
 {
@@ -10291,7 +10275,9 @@ int bpf_xdp_link_attach(const union bpf_attr *attr, struct bpf_prog *prog)
 		goto unlock;
 	}
 
+	netdev_lock_ops(dev);
 	err = dev_xdp_attach_link(dev, &extack, link);
+	netdev_unlock_ops(dev);
 	rtnl_unlock();
 
 	if (err) {
@@ -10462,6 +10448,7 @@ static void netdev_sync_lower_features(struct net_device *upper,
 		if (!(features & feature) && (lower->features & feature)) {
 			netdev_dbg(upper, "Disabling feature %pNF on lower dev %s.\n",
 				   &feature, lower->name);
+			netdev_lock_ops(lower);
 			lower->wanted_features &= ~feature;
 			__netdev_update_features(lower);
 
@@ -10470,6 +10457,7 @@ static void netdev_sync_lower_features(struct net_device *upper,
 					    &feature, lower->name);
 			else
 				netdev_features_change(lower);
+			netdev_unlock_ops(lower);
 		}
 	}
 }
@@ -11052,7 +11040,9 @@ int register_netdevice(struct net_device *dev)
 		memcpy(dev->perm_addr, dev->dev_addr, dev->addr_len);
 
 	/* Notify protocols, that a new device appeared. */
+	netdev_lock_ops(dev);
 	ret = call_netdevice_notifiers(NETDEV_REGISTER, dev);
+	netdev_unlock_ops(dev);
 	ret = notifier_to_errno(ret);
 	if (ret) {
 		/* Expect explicit free_netdev() on failure */
@@ -11941,15 +11931,24 @@ void unregister_netdevice_many_notify(struct list_head *head,
 		BUG_ON(dev->reg_state != NETREG_REGISTERED);
 	}
 
-	/* If device is running, close it first. */
+	/* If device is running, close it first. Start with ops locked... */
 	list_for_each_entry(dev, head, unreg_list) {
-		list_add_tail(&dev->close_list, &close_head);
-		netdev_lock_ops(dev);
+		if (netdev_need_ops_lock(dev)) {
+			list_add_tail(&dev->close_list, &close_head);
+			netdev_lock(dev);
+		}
+	}
+	dev_close_many(&close_head, true);
+	/* ... now unlock them and go over the rest. */
+	list_for_each_entry(dev, head, unreg_list) {
+		if (netdev_need_ops_lock(dev))
+			netdev_unlock(dev);
+		else
+			list_add_tail(&dev->close_list, &close_head);
 	}
 	dev_close_many(&close_head, true);
 
 	list_for_each_entry(dev, head, unreg_list) {
-		netdev_unlock_ops(dev);
 		/* And unlink it from device chain. */
 		unlist_netdevice(dev);
 		netdev_lock(dev);
@@ -11964,9 +11963,9 @@ void unregister_netdevice_many_notify(struct list_head *head,
 		struct sk_buff *skb = NULL;
 
 		/* Shutdown queueing discipline. */
+		netdev_lock_ops(dev);
 		dev_shutdown(dev);
 		dev_tcx_uninstall(dev);
-		netdev_lock_ops(dev);
 		dev_xdp_uninstall(dev);
 		dev_memory_provider_uninstall(dev);
 		netdev_unlock_ops(dev);
@@ -12064,7 +12063,7 @@ void unregister_netdev(struct net_device *dev)
 }
 EXPORT_SYMBOL(unregister_netdev);
 
-int netif_change_net_namespace(struct net_device *dev, struct net *net,
+int __dev_change_net_namespace(struct net_device *dev, struct net *net,
 			       const char *pat, int new_ifindex,
 			       struct netlink_ext_ack *extack)
 {
@@ -12149,16 +12148,19 @@ int netif_change_net_namespace(struct net_device *dev, struct net *net,
 	 * And now a mini version of register_netdevice unregister_netdevice.
 	 */
 
+	netdev_lock_ops(dev);
 	/* If device is running close it first. */
 	netif_close(dev);
-
 	/* And unlink it from device chain */
 	unlist_netdevice(dev);
+	netdev_unlock_ops(dev);
 
 	synchronize_net();
 
 	/* Shutdown queueing discipline. */
+	netdev_lock_ops(dev);
 	dev_shutdown(dev);
+	netdev_unlock_ops(dev);
 
 	/* Notify protocols, that we are about to destroy
 	 * this device. They should clean all the things.
@@ -12215,11 +12217,12 @@ int netif_change_net_namespace(struct net_device *dev, struct net *net,
 	err = netdev_change_owner(dev, net_old, net);
 	WARN_ON(err);
 
+	netdev_lock_ops(dev);
 	/* Add the device back in the hashes */
 	list_netdevice(dev);
-
 	/* Notify protocols, that a new device appeared. */
 	call_netdevice_notifiers(NETDEV_REGISTER, dev);
+	netdev_unlock_ops(dev);
 
 	/*
 	 *	Prevent userspace races by waiting until the network

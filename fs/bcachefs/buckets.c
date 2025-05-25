@@ -30,8 +30,15 @@
 
 void bch2_dev_usage_read_fast(struct bch_dev *ca, struct bch_dev_usage *usage)
 {
+	for (unsigned i = 0; i < BCH_DATA_NR; i++)
+		usage->buckets[i] = percpu_u64_get(&ca->usage->d[i].buckets);
+}
+
+void bch2_dev_usage_full_read_fast(struct bch_dev *ca, struct bch_dev_usage_full *usage)
+{
 	memset(usage, 0, sizeof(*usage));
-	acc_u64s_percpu((u64 *) usage, (u64 __percpu *) ca->usage, dev_usage_u64s());
+	acc_u64s_percpu((u64 *) usage, (u64 __percpu *) ca->usage,
+			sizeof(struct bch_dev_usage_full) / sizeof(u64));
 }
 
 static u64 reserve_factor(u64 r)
@@ -75,7 +82,7 @@ bch2_fs_usage_read_short(struct bch_fs *c)
 
 void bch2_dev_usage_to_text(struct printbuf *out,
 			    struct bch_dev *ca,
-			    struct bch_dev_usage *usage)
+			    struct bch_dev_usage_full *usage)
 {
 	if (out->nr_tabstops < 5) {
 		printbuf_tabstops_reset(out);
@@ -365,7 +372,7 @@ found:
 		struct btree_iter iter;
 		bch2_trans_node_iter_init(trans, &iter, btree, new->k.p, 0, level,
 					  BTREE_ITER_intent|BTREE_ITER_all_snapshots);
-		ret =   bch2_btree_iter_traverse(&iter) ?:
+		ret =   bch2_btree_iter_traverse(trans, &iter) ?:
 			bch2_trans_update(trans, &iter, new,
 					  BTREE_UPDATE_internal_snapshot_node|
 					  BTREE_TRIGGER_norun);
@@ -597,6 +604,13 @@ static int bch2_trigger_pointer(struct btree_trans *trans,
 	}
 
 	struct bpos bucket = PTR_BUCKET_POS(ca, &p.ptr);
+	if (!bucket_valid(ca, bucket.offset)) {
+		if (insert) {
+			bch2_dev_bucket_missing(ca, bucket.offset);
+			ret = -BCH_ERR_trigger_pointer;
+		}
+		goto err;
+	}
 
 	if (flags & BTREE_TRIGGER_transactional) {
 		struct bkey_i_alloc_v4 *a = bch2_trans_start_alloc_update(trans, bucket, 0);
@@ -707,7 +721,7 @@ err:
 		struct disk_accounting_pos acc;
 		memset(&acc, 0, sizeof(acc));
 		acc.type = BCH_DISK_ACCOUNTING_replicas;
-		memcpy(&acc.replicas, &m->r.e, replicas_entry_bytes(&m->r.e));
+		unsafe_memcpy(&acc.replicas, &m->r.e, replicas_entry_bytes(&m->r.e), "VLA");
 		gc_stripe_unlock(m);
 
 		acc.replicas.data_type = data_type;
@@ -1132,7 +1146,7 @@ int bch2_trans_mark_dev_sbs_flags(struct bch_fs *c,
 	for_each_online_member(c, ca) {
 		int ret = bch2_trans_mark_dev_sb(c, ca, flags);
 		if (ret) {
-			percpu_ref_put(&ca->io_ref);
+			percpu_ref_put(&ca->io_ref[READ]);
 			return ret;
 		}
 	}
@@ -1300,13 +1314,11 @@ int bch2_dev_buckets_resize(struct bch_fs *c, struct bch_dev *ca, u64 nbuckets)
 	old_bucket_gens = rcu_dereference_protected(ca->bucket_gens, 1);
 
 	if (resize) {
-		bucket_gens->nbuckets = min(bucket_gens->nbuckets,
-					    old_bucket_gens->nbuckets);
-		bucket_gens->nbuckets_minus_first =
-			bucket_gens->nbuckets - bucket_gens->first_bucket;
+		u64 copy = min(bucket_gens->nbuckets,
+			       old_bucket_gens->nbuckets);
 		memcpy(bucket_gens->b,
 		       old_bucket_gens->b,
-		       bucket_gens->nbuckets);
+		       sizeof(bucket_gens->b[0]) * copy);
 	}
 
 	rcu_assign_pointer(ca->bucket_gens, bucket_gens);
@@ -1331,7 +1343,7 @@ void bch2_dev_buckets_free(struct bch_dev *ca)
 
 int bch2_dev_buckets_alloc(struct bch_fs *c, struct bch_dev *ca)
 {
-	ca->usage = alloc_percpu(struct bch_dev_usage);
+	ca->usage = alloc_percpu(struct bch_dev_usage_full);
 	if (!ca->usage)
 		return -BCH_ERR_ENOMEM_usage_init;
 

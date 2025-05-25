@@ -516,7 +516,7 @@ static void am65_cpsw_destroy_rxq(struct am65_cpsw_common *common, int id)
 	napi_disable(&flow->napi_rx);
 	hrtimer_cancel(&flow->rx_hrtimer);
 	k3_udma_glue_reset_rx_chn(rx_chn->rx_chn, id, rx_chn,
-				  am65_cpsw_nuss_rx_cleanup, !!id);
+				  am65_cpsw_nuss_rx_cleanup);
 
 	for (port = 0; port < common->port_num; port++) {
 		if (!common->ports[port].ndev)
@@ -2666,7 +2666,7 @@ static int am65_cpsw_nuss_init_slave_ports(struct am65_cpsw_common *common)
 				of_property_read_bool(port_np, "ti,mac-only");
 
 		/* get phy/link info */
-		port->slave.port_np = port_np;
+		port->slave.port_np = of_node_get(port_np);
 		ret = of_get_phy_mode(port_np, &port->slave.phy_if);
 		if (ret) {
 			dev_err(dev, "%pOF read phy-mode err %d\n",
@@ -2717,6 +2717,17 @@ static void am65_cpsw_nuss_phylink_cleanup(struct am65_cpsw_common *common)
 		port = &common->ports[i];
 		if (port->slave.phylink)
 			phylink_destroy(port->slave.phylink);
+	}
+}
+
+static void am65_cpsw_remove_dt(struct am65_cpsw_common *common)
+{
+	struct am65_cpsw_port *port;
+	int i;
+
+	for (i = 0; i < common->port_num; i++) {
+		port = &common->ports[i];
+		of_node_put(port->slave.port_np);
 	}
 }
 
@@ -3332,7 +3343,7 @@ static int am65_cpsw_nuss_register_ndevs(struct am65_cpsw_common *common)
 	for (i = 0; i < common->rx_ch_num_flows; i++)
 		k3_udma_glue_reset_rx_chn(rx_chan->rx_chn, i,
 					  rx_chan,
-					  am65_cpsw_nuss_rx_cleanup, !!i);
+					  am65_cpsw_nuss_rx_cleanup);
 
 	k3_udma_glue_disable_rx_chn(rx_chan->rx_chn);
 
@@ -3622,6 +3633,7 @@ err_ndevs_clear:
 	am65_cpsw_nuss_cleanup_ndev(common);
 	am65_cpsw_nuss_phylink_cleanup(common);
 	am65_cpts_release(common->cpts);
+	am65_cpsw_remove_dt(common);
 err_of_clear:
 	if (common->mdio_dev)
 		of_platform_device_destroy(common->mdio_dev, NULL);
@@ -3661,6 +3673,7 @@ static void am65_cpsw_nuss_remove(struct platform_device *pdev)
 	am65_cpsw_nuss_phylink_cleanup(common);
 	am65_cpts_release(common->cpts);
 	am65_cpsw_disable_serdes_phy(common);
+	am65_cpsw_remove_dt(common);
 
 	if (common->mdio_dev)
 		of_platform_device_destroy(common->mdio_dev, NULL);

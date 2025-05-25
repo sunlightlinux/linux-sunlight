@@ -186,7 +186,7 @@ static int lookup_lostfound(struct btree_trans *trans, u32 snapshot,
 {
 	struct bch_fs *c = trans->c;
 	struct qstr lostfound_str = QSTR("lost+found");
-	struct btree_iter lostfound_iter = { NULL };
+	struct btree_iter lostfound_iter = {};
 	u64 inum = 0;
 	unsigned d_type = 0;
 	int ret;
@@ -295,8 +295,8 @@ create_lostfound:
 	if (ret)
 		goto err;
 
-	bch2_btree_iter_set_snapshot(&lostfound_iter, snapshot);
-	ret = bch2_btree_iter_traverse(&lostfound_iter);
+	bch2_btree_iter_set_snapshot(trans, &lostfound_iter, snapshot);
+	ret = bch2_btree_iter_traverse(trans, &lostfound_iter);
 	if (ret)
 		goto err;
 
@@ -319,6 +319,31 @@ static inline bool inode_should_reattach(struct bch_inode_unpacked *inode)
 {
 	if (inode->bi_inum == BCACHEFS_ROOT_INO &&
 	    inode->bi_subvol == BCACHEFS_ROOT_SUBVOL)
+		return false;
+
+	/*
+	 * Subvolume roots are special: older versions of subvolume roots may be
+	 * disconnected, it's only the newest version that matters.
+	 *
+	 * We only keep a single dirent pointing to a subvolume root, i.e.
+	 * older versions of snapshots will not have a different dirent pointing
+	 * to the same subvolume root.
+	 *
+	 * This is because dirents that point to subvolumes are only visible in
+	 * the parent subvolume - versioning is not needed - and keeping them
+	 * around would break fsck, because when we're crossing subvolumes we
+	 * don't have a consistent snapshot ID to do check the inode <-> dirent
+	 * relationships.
+	 *
+	 * Thus, a subvolume root that's been renamed after a snapshot will have
+	 * a disconnected older version - that's expected.
+	 *
+	 * Note that taking a snapshot always updates the root inode (to update
+	 * the dirent backpointer), so a subvolume root inode with
+	 * BCH_INODE_has_child_snapshot is never visible.
+	 */
+	if (inode->bi_subvol &&
+	    (inode->bi_flags & BCH_INODE_has_child_snapshot))
 		return false;
 
 	return !inode->bi_dir && !(inode->bi_flags & BCH_INODE_unlinked);
@@ -544,7 +569,7 @@ static int reconstruct_subvol(struct btree_trans *trans, u32 snapshotid, u32 sub
 		new_inode.bi_subvol = subvolid;
 
 		int ret = bch2_inode_create(trans, &inode_iter, &new_inode, snapshotid, cpu) ?:
-			  bch2_btree_iter_traverse(&inode_iter) ?:
+			  bch2_btree_iter_traverse(trans, &inode_iter) ?:
 			  bch2_inode_write(trans, &inode_iter, &new_inode);
 		bch2_trans_iter_exit(trans, &inode_iter);
 		if (ret)
@@ -609,7 +634,7 @@ static int reconstruct_inode(struct btree_trans *trans, enum btree_id btree, u32
 		struct btree_iter iter = {};
 
 		bch2_trans_iter_init(trans, &iter, BTREE_ID_extents, SPOS(inum, U64_MAX, snapshot), 0);
-		struct bkey_s_c k = bch2_btree_iter_peek_prev_min(&iter, POS(inum, 0));
+		struct bkey_s_c k = bch2_btree_iter_peek_prev_min(trans, &iter, POS(inum, 0));
 		bch2_trans_iter_exit(trans, &iter);
 		int ret = bkey_err(k);
 		if (ret)
@@ -1007,6 +1032,23 @@ static int check_inode_dirent_inode(struct btree_trans *trans,
 	if (ret && !bch2_err_matches(ret, ENOENT))
 		return ret;
 
+	if ((ret || dirent_points_to_inode_nowarn(d, inode)) &&
+	    inode->bi_subvol &&
+	    (inode->bi_flags & BCH_INODE_has_child_snapshot)) {
+		/* Older version of a renamed subvolume root: we won't have a
+		 * correct dirent for it. That's expected, see
+		 * inode_should_reattach().
+		 *
+		 * We don't clear the backpointer field when doing the rename
+		 * because there might be arbitrarily many versions in older
+		 * snapshots.
+		 */
+		inode->bi_dir = 0;
+		inode->bi_dir_offset = 0;
+		*write_inode = true;
+		goto out;
+	}
+
 	if (fsck_err_on(ret,
 			trans, inode_points_to_missing_dirent,
 			"inode points to missing dirent\n%s",
@@ -1027,7 +1069,7 @@ static int check_inode_dirent_inode(struct btree_trans *trans,
 		inode->bi_dir_offset = 0;
 		*write_inode = true;
 	}
-
+out:
 	ret = 0;
 fsck_err:
 	bch2_trans_iter_exit(trans, &dirent_iter);
@@ -1557,7 +1599,7 @@ static int overlapping_extents_found(struct btree_trans *trans,
 {
 	struct bch_fs *c = trans->c;
 	struct printbuf buf = PRINTBUF;
-	struct btree_iter iter1, iter2 = { NULL };
+	struct btree_iter iter1, iter2 = {};
 	struct bkey_s_c k1, k2;
 	int ret;
 
@@ -1566,7 +1608,7 @@ static int overlapping_extents_found(struct btree_trans *trans,
 	bch2_trans_iter_init(trans, &iter1, btree, pos1,
 			     BTREE_ITER_all_snapshots|
 			     BTREE_ITER_not_extents);
-	k1 = bch2_btree_iter_peek_max(&iter1, POS(pos1.inode, U64_MAX));
+	k1 = bch2_btree_iter_peek_max(trans, &iter1, POS(pos1.inode, U64_MAX));
 	ret = bkey_err(k1);
 	if (ret)
 		goto err;
@@ -1586,12 +1628,12 @@ static int overlapping_extents_found(struct btree_trans *trans,
 		goto err;
 	}
 
-	bch2_trans_copy_iter(&iter2, &iter1);
+	bch2_trans_copy_iter(trans, &iter2, &iter1);
 
 	while (1) {
-		bch2_btree_iter_advance(&iter2);
+		bch2_btree_iter_advance(trans, &iter2);
 
-		k2 = bch2_btree_iter_peek_max(&iter2, POS(pos1.inode, U64_MAX));
+		k2 = bch2_btree_iter_peek_max(trans, &iter2, POS(pos1.inode, U64_MAX));
 		ret = bkey_err(k2);
 		if (ret)
 			goto err;
@@ -1791,9 +1833,9 @@ static int check_extent(struct btree_trans *trans, struct btree_iter *iter,
 					(bch2_bkey_val_to_text(&buf, c, k), buf.buf))) {
 				struct btree_iter iter2;
 
-				bch2_trans_copy_iter(&iter2, iter);
-				bch2_btree_iter_set_snapshot(&iter2, i->snapshot);
-				ret =   bch2_btree_iter_traverse(&iter2) ?:
+				bch2_trans_copy_iter(trans, &iter2, iter);
+				bch2_btree_iter_set_snapshot(trans, &iter2, i->snapshot);
+				ret =   bch2_btree_iter_traverse(trans, &iter2) ?:
 					bch2_btree_delete_at(trans, &iter2,
 						BTREE_UPDATE_internal_snapshot_node);
 				bch2_trans_iter_exit(trans, &iter2);
@@ -2185,7 +2227,7 @@ static int check_dirent(struct btree_trans *trans, struct btree_iter *iter,
 						     BTREE_ID_dirents,
 						     SPOS(k.k->p.inode, k.k->p.offset, *i),
 						     BTREE_ITER_intent);
-				ret =   bch2_btree_iter_traverse(&delete_iter) ?:
+				ret =   bch2_btree_iter_traverse(trans, &delete_iter) ?:
 					bch2_hash_delete_at(trans, bch2_dirent_hash_desc,
 							  hash_info,
 							  &delete_iter,
@@ -2404,7 +2446,7 @@ static int check_subvol_path(struct btree_trans *trans, struct btree_iter *iter,
 		u32 parent = le32_to_cpu(s.v->fs_path_parent);
 
 		if (darray_u32_has(&subvol_path, parent)) {
-			if (fsck_err(c, subvol_loop, "subvolume loop"))
+			if (fsck_err(trans, subvol_loop, "subvolume loop"))
 				ret = reattach_subvol(trans, s);
 			break;
 		}
@@ -2412,7 +2454,7 @@ static int check_subvol_path(struct btree_trans *trans, struct btree_iter *iter,
 		bch2_trans_iter_exit(trans, &parent_iter);
 		bch2_trans_iter_init(trans, &parent_iter,
 				     BTREE_ID_subvolumes, POS(0, parent), 0);
-		k = bch2_btree_iter_peek_slot(&parent_iter);
+		k = bch2_btree_iter_peek_slot(trans, &parent_iter);
 		ret = bkey_err(k);
 		if (ret)
 			goto err;

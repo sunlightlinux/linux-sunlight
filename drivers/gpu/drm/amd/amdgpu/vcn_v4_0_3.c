@@ -45,6 +45,7 @@
 
 #define VCN_VID_SOC_ADDRESS_2_0		0x1fb00
 #define VCN1_VID_SOC_ADDRESS_3_0	0x48300
+#define VCN1_AON_SOC_ADDRESS_3_0	0x48000
 
 static const struct amdgpu_hwip_reg_entry vcn_reg_list_4_0_3[] = {
 	SOC15_REG_ENTRY_STR(VCN, 0, regUVD_POWER_STATUS),
@@ -1965,7 +1966,7 @@ static int vcn_v4_0_3_aca_bank_parser(struct aca_handle *handle, struct aca_bank
 						     1ULL);
 		break;
 	case ACA_SMU_TYPE_CE:
-		bank->aca_err_type = ACA_BANK_ERR_CE_DE_DECODE(bank);
+		bank->aca_err_type = ACA_ERROR_TYPE_CE;
 		ret = aca_error_cache_log_bank_error(handle, &info, bank->aca_err_type,
 						     ACA_REG__MISC0__ERRCNT(misc0));
 		break;

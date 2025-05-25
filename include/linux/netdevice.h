@@ -4191,7 +4191,7 @@ int dev_change_flags(struct net_device *dev, unsigned int flags,
 int netif_set_alias(struct net_device *dev, const char *alias, size_t len);
 int dev_set_alias(struct net_device *, const char *, size_t);
 int dev_get_alias(const struct net_device *, char *, size_t);
-int netif_change_net_namespace(struct net_device *dev, struct net *net,
+int __dev_change_net_namespace(struct net_device *dev, struct net *net,
 			       const char *pat, int new_ifindex,
 			       struct netlink_ext_ack *extack);
 int dev_change_net_namespace(struct net_device *dev, struct net *net,
@@ -4428,6 +4428,7 @@ void linkwatch_fire_event(struct net_device *dev);
  * pending work list (if queued).
  */
 void linkwatch_sync_dev(struct net_device *dev);
+void __linkwatch_sync_dev(struct net_device *dev);
 
 /**
  *	netif_carrier_ok - test if carrier present
@@ -4970,9 +4971,11 @@ static inline void __dev_mc_unsync(struct net_device *dev,
 
 /* Functions used for secondary unicast and multicast support */
 void dev_set_rx_mode(struct net_device *dev);
+int netif_set_promiscuity(struct net_device *dev, int inc);
 int dev_set_promiscuity(struct net_device *dev, int inc);
 int netif_set_allmulti(struct net_device *dev, int inc, bool notify);
 int dev_set_allmulti(struct net_device *dev, int inc);
+void netif_state_change(struct net_device *dev);
 void netdev_state_change(struct net_device *dev);
 void __netdev_notify_peers(struct net_device *dev);
 void netdev_notify_peers(struct net_device *dev);
