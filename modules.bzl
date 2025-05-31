@@ -43,6 +43,7 @@ _COMMON_GKI_MODULES_LIST = [
     "drivers/power/sequencing/pwrseq-core.ko",
     "drivers/pps/pps_core.ko",
     "drivers/ptp/ptp.ko",
+    "drivers/thunderbolt/thunderbolt.ko",
     "drivers/usb/class/cdc-acm.ko",
     "drivers/usb/mon/usbmon.ko",
     "drivers/usb/serial/ftdi_sio.ko",
@@ -210,7 +211,7 @@ def get_kunit_modules_list(arch = None):
     elif arch == "arm64":
         kunit_modules_list += _KUNIT_CLK_MODULES_LIST
     elif arch == "i386":
-        kunit_modules_list += []
+        kunit_modules_list.append("drivers/clk/clk_kunit_helpers.ko")
     elif arch == "x86_64":
         kunit_modules_list.append("drivers/clk/clk_kunit_helpers.ko")
     else:
