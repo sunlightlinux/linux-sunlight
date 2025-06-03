@@ -16,6 +16,7 @@
 #include <linux/tick.h>
 #include <linux/sched/stat.h>
 #include <linux/math64.h>
+#include <linux/cpuidle_psd.h>
 
 #include "gov.h"
 
@@ -239,6 +240,9 @@ static int menu_select(struct cpuidle_driver *drv, struct cpuidle_device *dev,
 		 */
 		menu_update_intervals(data, UINT_MAX);
 	}
+
+	if (have_prevent_sleep_demotion())
+		latency_req = 0;
 
 	/* Find the shortest expected idle interval. */
 	predicted_ns = get_typical_interval(data) * NSEC_PER_USEC;

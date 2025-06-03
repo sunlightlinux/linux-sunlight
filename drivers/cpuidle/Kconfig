@@ -81,6 +81,16 @@ config HALTPOLL_CPUIDLE
 	 before halting in the guest (more efficient than polling in the
 	 host via halt_poll_ns for some scenarios).
 
+config CPU_IDLE_PSD
+	bool "prevent sleep demotion (PSD) for fast I/O devices"
+        default y
+        help
+         This option enables deferring of deep sleep states when a future
+         I/O based servicing event very probably going to happen in the very
+         near future, such as handling fast NVME device I/O. This reduces
+         uncessary transistions to deep idle sleep and reduces latency. This
+         provides the latency benefits of disabling deep sleep with the
+         power saving benefits of deep sleep when I/O is idle.
 endif
 
 config ARCH_NEEDS_CPU_IDLE_COUPLED
