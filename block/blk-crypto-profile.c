@@ -521,6 +521,7 @@ int blk_crypto_import_key(struct blk_crypto_profile *profile,
 	blk_crypto_hw_exit(profile);
 	return ret;
 }
+EXPORT_SYMBOL_GPL(blk_crypto_import_key);
 
 int blk_crypto_generate_key(struct blk_crypto_profile *profile,
 			    u8 lt_key[BLK_CRYPTO_MAX_HW_WRAPPED_KEY_SIZE])
@@ -538,6 +539,7 @@ int blk_crypto_generate_key(struct blk_crypto_profile *profile,
 	blk_crypto_hw_exit(profile);
 	return ret;
 }
+EXPORT_SYMBOL_GPL(blk_crypto_generate_key);
 
 int blk_crypto_prepare_key(struct blk_crypto_profile *profile,
 			   const u8 *lt_key, size_t lt_key_size,
@@ -557,6 +559,7 @@ int blk_crypto_prepare_key(struct blk_crypto_profile *profile,
 	blk_crypto_hw_exit(profile);
 	return ret;
 }
+EXPORT_SYMBOL_GPL(blk_crypto_prepare_key);
 
 /**
  * blk_crypto_intersect_capabilities() - restrict supported crypto capabilities
