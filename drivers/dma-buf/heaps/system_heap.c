@@ -24,9 +24,6 @@
 #include <linux/swiotlb.h>
 #include <linux/vmalloc.h>
 
-static struct dma_heap *sys_heap;
-static struct dma_heap *sys_uncached_heap;
-
 struct system_heap_buffer {
 	struct dma_heap *heap;
 	struct list_head attachments;
@@ -523,6 +520,8 @@ static struct dma_heap_ops system_uncached_heap_ops = {
 static int __init system_heap_create(void)
 {
 	struct dma_heap_export_info exp_info;
+	struct dma_heap *sys_uncached_heap;
+	struct dma_heap *sys_heap;
 
 	exp_info.name = "system";
 	exp_info.ops = &system_heap_ops;
