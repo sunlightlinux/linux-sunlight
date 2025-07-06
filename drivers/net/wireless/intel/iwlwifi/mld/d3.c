@@ -1757,12 +1757,7 @@ iwl_mld_send_proto_offload(struct iwl_mld *mld,
 
 		addrconf_addr_solict_mult(&wowlan_data->target_ipv6_addrs[i],
 					  &solicited_addr);
-
-/* TODO(b/411091992): remove pragma workaround once issue is resolved. */
-#ifdef __clang__
-#pragma clang loop unroll(disable)
-#endif
-		for (j = 0; j < c; j++)
+		for (j = 0; j < n_nsc && j < c; j++)
 			if (ipv6_addr_cmp(&nsc[j].dest_ipv6_addr,
 					  &solicited_addr) == 0)
 				break;
