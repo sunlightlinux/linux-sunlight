@@ -210,7 +210,7 @@ static void idletimer_tg_work(struct work_struct *work)
 
 static void idletimer_tg_expired(struct timer_list *t)
 {
-	struct idletimer_tg *timer = from_timer(timer, t, timer);
+	struct idletimer_tg *timer = timer_container_of(timer, t, timer);
 
 	pr_debug("timer %s expired\n", timer->attr.attr.name);
 
@@ -350,7 +350,7 @@ static int idletimer_tg_create(struct idletimer_tg_info *info)
 
 	timer_setup(&info->timer->timer, idletimer_tg_expired, 0);
 	mod_timer(&info->timer->timer,
-		  msecs_to_jiffies(info->timeout * 1000) + jiffies);
+		  secs_to_jiffies(info->timeout) + jiffies);
 
 	return 0;
 
@@ -427,7 +427,7 @@ static int idletimer_tg_create_v1(struct idletimer_tg_info_v1 *info)
 	} else {
 		timer_setup(&info->timer->timer, idletimer_tg_expired, 0);
 		mod_timer(&info->timer->timer,
-			  msecs_to_jiffies(info->timeout * 1000) + jiffies);
+				secs_to_jiffies(info->timeout) + jiffies);
 	}
 
 	return 0;
@@ -471,7 +471,7 @@ static void reset_timer(struct idletimer_tg * const info_timer,
 	}
 
 	info_timer->last_modified_timer = ktime_to_timespec64(ktime_get_boottime());
-	mod_timer(&info_timer->timer, msecs_to_jiffies(info_timeout * 1000) + now);
+	mod_timer(&info_timer->timer, secs_to_jiffies(info_timeout) + now);
 	spin_unlock_bh(&timestamp_lock);
 }
 

@@ -363,6 +363,8 @@ static int handle_overwrites(struct bch_fs *c,
 				min_heap_sift_down(nodes_heap, 0, &found_btree_node_heap_cbs, NULL);
 			}
 		}
+
+		cond_resched();
 	}
 
 	return 0;
@@ -519,8 +521,12 @@ bool bch2_btree_node_is_stale(struct bch_fs *c, struct btree *b)
 	return false;
 }
 
-bool bch2_btree_has_scanned_nodes(struct bch_fs *c, enum btree_id btree)
+int bch2_btree_has_scanned_nodes(struct bch_fs *c, enum btree_id btree)
 {
+	int ret = bch2_run_print_explicit_recovery_pass(c, BCH_RECOVERY_PASS_scan_for_btree_nodes);
+	if (ret)
+		return ret;
+
 	struct found_btree_node search = {
 		.btree_id	= btree,
 		.level		= 0,

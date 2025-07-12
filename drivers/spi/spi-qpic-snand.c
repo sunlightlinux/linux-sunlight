@@ -639,6 +639,20 @@ static int qcom_spi_check_error(struct qcom_nand_controller *snandc)
 			unsigned int stat;
 
 			stat = buffer & BS_CORRECTABLE_ERR_MSK;
+
+			/*
+			 * The exact number of the corrected bits is
+			 * unknown because the hardware only reports the
+			 * number of the corrected bytes.
+			 *
+			 * Since we have no better solution at the moment,
+			 * report that value as the number of bit errors
+			 * despite that it is inaccurate in most cases.
+			 */
+			if (stat && stat != ecc_cfg->strength)
+				dev_warn_once(snandc->dev,
+					      "Warning: due to hw limitation, the reported number of the corrected bits may be inaccurate\n");
+
 			snandc->qspi->ecc_stats.corrected += stat;
 			max_bitflips = max(max_bitflips, stat);
 		}
@@ -1616,6 +1630,7 @@ static void qcom_spi_remove(struct platform_device *pdev)
 
 static const struct qcom_nandc_props ipq9574_snandc_props = {
 	.dev_cmd_reg_start = 0x7000,
+	.bam_offset = 0x30000,
 	.supports_bam = true,
 };
 

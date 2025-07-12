@@ -21,7 +21,6 @@ TRACE_DEFINE_ENUM(SOCK_DGRAM);
 TRACE_DEFINE_ENUM(SOCK_RAW);
 TRACE_DEFINE_ENUM(SOCK_RDM);
 TRACE_DEFINE_ENUM(SOCK_SEQPACKET);
-TRACE_DEFINE_ENUM(SOCK_DCCP);
 TRACE_DEFINE_ENUM(SOCK_PACKET);
 
 #define show_socket_type(type)					\
@@ -31,7 +30,6 @@ TRACE_DEFINE_ENUM(SOCK_PACKET);
 		{ SOCK_RAW,		"RAW" },		\
 		{ SOCK_RDM,		"RDM" },		\
 		{ SOCK_SEQPACKET,	"SEQPACKET" },		\
-		{ SOCK_DCCP,		"DCCP" },		\
 		{ SOCK_PACKET,		"PACKET" })
 
 /* This list is known to be incomplete, add new enums as needed. */
@@ -1100,7 +1098,7 @@ TRACE_EVENT(xprt_transmit,
 		__entry->client_id = rqst->rq_task->tk_client ?
 			rqst->rq_task->tk_client->cl_clid : -1;
 		__entry->xid = be32_to_cpu(rqst->rq_xid);
-		__entry->seqno = rqst->rq_seqno;
+		__entry->seqno = *rqst->rq_seqnos;
 		__entry->status = status;
 	),
 
