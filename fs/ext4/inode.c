@@ -1171,7 +1171,7 @@ int ext4_block_write_begin(handle_t *handle, struct folio *folio,
 			}
 			continue;
 		}
-		if (buffer_new(bh))
+		if (WARN_ON_ONCE(buffer_new(bh)))
 			clear_buffer_new(bh);
 		if (!buffer_mapped(bh)) {
 			WARN_ON(bh->b_size != blocksize);
@@ -1395,6 +1395,7 @@ static int write_end_fn(handle_t *handle, struct inode *inode,
 	ret = ext4_dirty_journalled_data(handle, bh);
 	clear_buffer_meta(bh);
 	clear_buffer_prio(bh);
+	clear_buffer_new(bh);
 	return ret;
 }
 
@@ -5106,7 +5107,7 @@ error:
 	return -EFSCORRUPTED;
 }
 
-bool ext4_should_enable_large_folio(struct inode *inode)
+static bool ext4_should_enable_large_folio(struct inode *inode)
 {
 	struct super_block *sb = inode->i_sb;
 
@@ -5121,6 +5122,22 @@ bool ext4_should_enable_large_folio(struct inode *inode)
 		return false;
 
 	return true;
+}
+
+/*
+ * Limit the maximum folio order to 2048 blocks to prevent overestimation
+ * of reserve handle credits during the folio writeback in environments
+ * where the PAGE_SIZE exceeds 4KB.
+ */
+#define EXT4_MAX_PAGECACHE_ORDER(i)		\
+		umin(MAX_PAGECACHE_ORDER, (11 + (i)->i_blkbits - PAGE_SHIFT))
+void ext4_set_inode_mapping_order(struct inode *inode)
+{
+	if (!ext4_should_enable_large_folio(inode))
+		return;
+
+	mapping_set_folio_order_range(inode->i_mapping, 0,
+				      EXT4_MAX_PAGECACHE_ORDER(inode));
 }
 
 struct inode *__ext4_iget(struct super_block *sb, unsigned long ino,
@@ -5440,8 +5457,8 @@ struct inode *__ext4_iget(struct super_block *sb, unsigned long ino,
 		ret = -EFSCORRUPTED;
 		goto bad_inode;
 	}
-	if (ext4_should_enable_large_folio(inode))
-		mapping_set_large_folios(inode->i_mapping);
+
+	ext4_set_inode_mapping_order(inode);
 
 	ret = check_igot_inode(inode, flags, function, line);
 	/*
@@ -6139,7 +6156,7 @@ int ext4_meta_trans_blocks(struct inode *inode, int lblocks, int pextents)
 	int ret;
 
 	/*
-	 * How many index and lead blocks need to touch to map @lblocks
+	 * How many index and leaf blocks need to touch to map @lblocks
 	 * logical blocks to @pextents physical extents?
 	 */
 	idxblocks = ext4_index_trans_blocks(inode, lblocks, pextents);
@@ -6148,7 +6165,7 @@ int ext4_meta_trans_blocks(struct inode *inode, int lblocks, int pextents)
 	 * Now let's see how many group bitmaps and group descriptors need
 	 * to account
 	 */
-	groups = idxblocks;
+	groups = idxblocks + pextents;
 	gdpblocks = groups;
 	if (groups > ngroups)
 		groups = ngroups;
