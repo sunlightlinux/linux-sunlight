@@ -153,7 +153,7 @@ static unsigned int sysctl_sched_cfs_bandwidth_slice		= 5000UL;
 /* Restrict the NUMA promotion throughput (MB/s) for each target node. */
 static unsigned int sysctl_numa_balancing_promote_rate_limit = 65536;
 
-#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_HZ_858) || defined(CONFIG_NO_HZ_FULL)
 /* ULL optimization: More aggressive NUMA balancing for latency-sensitive systems */
 static unsigned int ull_numa_scan_period_min = 500;   /* Faster scanning */
 static unsigned int ull_numa_scan_size = 512;         /* Larger scan size */
@@ -2321,7 +2321,7 @@ static unsigned int task_nr_scan_windows(struct task_struct *p)
 
 static unsigned int task_scan_min(struct task_struct *p)
 {
-#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_HZ_858) || defined(CONFIG_NO_HZ_FULL)
 	/* ULL optimization: Use more aggressive NUMA scanning parameters */
 	unsigned int scan_size = READ_ONCE(ull_numa_scan_size);
 	unsigned int scan_period_min = ull_numa_scan_period_min;
@@ -2752,7 +2752,7 @@ bool should_numa_migrate_memory(struct task_struct *p, struct folio *folio,
 			return true;
 		}
 
-#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_HZ_858) || defined(CONFIG_NO_HZ_FULL)
 		/* ULL optimization: Use more aggressive hot threshold */
 		def_th = ull_numa_hot_threshold;
 #else
@@ -4165,7 +4165,7 @@ static void task_numa_work(struct callback_head *work)
 	}
 
 	if (!mm->numa_next_scan) {
-#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_HZ_858) || defined(CONFIG_NO_HZ_FULL)
 		/* ULL optimization: Reduced NUMA scan delay for faster balancing */
 		mm->numa_next_scan = now +
 			msecs_to_jiffies(ull_numa_scan_delay);
