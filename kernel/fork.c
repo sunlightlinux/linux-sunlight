@@ -188,8 +188,12 @@ static struct kmem_cache *task_struct_cachep;
 
 #if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_HZ_858) || defined(CONFIG_NO_HZ_FULL)
 /* ULL optimization: per-CPU task_struct pools for reduced allocation latency */
-static DEFINE_PER_CPU(struct task_struct *, ull_task_cache[4]);
+static DEFINE_PER_CPU(struct task_struct *, ull_task_cache[8]);
 static DEFINE_PER_CPU(int, ull_task_cache_count);
+
+/* ULL optimization: per-CPU mm_struct pools for reduced allocation latency */
+static DEFINE_PER_CPU(struct mm_struct *, ull_mm_cache[4]);
+static DEFINE_PER_CPU(int, ull_mm_cache_count);
 
 static struct task_struct *alloc_task_struct_ull_fast(int node)
 {
@@ -213,9 +217,37 @@ static bool free_task_struct_ull_fast(struct task_struct *tsk)
 {
 	int *count = this_cpu_ptr(&ull_task_cache_count);
 
-	if (*count < 4) {
+	if (*count < 8) {
 		struct task_struct **cache = this_cpu_ptr(ull_task_cache);
 		cache[*count] = tsk;
+		(*count)++;
+		return true;
+	}
+	return false;
+}
+
+static struct mm_struct *allocate_mm_ull_fast(void)
+{
+	struct mm_struct *mm;
+	int *count = this_cpu_ptr(&ull_mm_cache_count);
+
+	if (*count > 0) {
+		struct mm_struct **cache = this_cpu_ptr(ull_mm_cache);
+		(*count)--;
+		mm = cache[*count];
+		cache[*count] = NULL;
+		return mm;
+	}
+	return NULL;
+}
+
+static bool free_mm_ull_fast(struct mm_struct *mm)
+{
+	int *count = this_cpu_ptr(&ull_mm_cache_count);
+
+	if (*count < 4) {
+		struct mm_struct **cache = this_cpu_ptr(ull_mm_cache);
+		cache[*count] = mm;
 		(*count)++;
 		return true;
 	}
@@ -657,8 +689,24 @@ static void check_mm(struct mm_struct *mm)
 #endif
 }
 
-#define allocate_mm()	(kmem_cache_alloc(mm_cachep, GFP_KERNEL))
-#define free_mm(mm)	(kmem_cache_free(mm_cachep, (mm)))
+static inline struct mm_struct *allocate_mm(void)
+{
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_HZ_858) || defined(CONFIG_NO_HZ_FULL)
+	struct mm_struct *mm = allocate_mm_ull_fast();
+	if (likely(mm))
+		return mm;
+#endif
+	return kmem_cache_alloc(mm_cachep, GFP_KERNEL);
+}
+
+static inline void free_mm(struct mm_struct *mm)
+{
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_HZ_858) || defined(CONFIG_NO_HZ_FULL)
+	if (likely(free_mm_ull_fast(mm)))
+		return;
+#endif
+	kmem_cache_free(mm_cachep, mm);
+}
 
 static void do_check_lazy_tlb(void *arg)
 {
