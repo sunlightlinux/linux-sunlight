@@ -28,6 +28,7 @@
 #include <linux/context_tracking.h>
 #include <linux/mm.h>
 #include <trace/hooks/sched.h>
+#include <linux/prefetch.h>
 
 #include <asm/irq_regs.h>
 
@@ -312,6 +313,12 @@ static enum hrtimer_restart tick_nohz_handler(struct hrtimer *timer)
 	struct pt_regs *regs = get_irq_regs();
 	ktime_t now = ktime_get();
 
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+	/* ULL optimization: Prefetch tick_sched structure for upcoming operations */
+	prefetch(&ts->last_jiffies);
+	prefetch(&ts->next_tick);
+#endif
+
 	tick_sched_do_timer(ts, now);
 
 	/*
@@ -386,6 +393,13 @@ static bool check_tick_dependency(atomic_t *dep)
 static bool can_stop_full_tick(int cpu, struct tick_sched *ts)
 {
 	lockdep_assert_irqs_disabled();
+
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+	/* ULL optimization: Prefetch dependency structures for faster checks */
+	prefetch(&tick_dep_mask);
+	prefetch(&ts->tick_dep_mask);
+	prefetch(&current->tick_dep_mask);
+#endif
 
 	if (unlikely(!cpu_online(cpu)))
 		return false;
@@ -885,6 +899,12 @@ static ktime_t tick_forward_now(ktime_t expires, ktime_t now)
 static void tick_nohz_restart(struct tick_sched *ts, ktime_t now)
 {
 	ktime_t expires = ts->last_tick;
+
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+	/* ULL optimization: Prefetch timer structure for restart operations */
+	prefetch(&ts->sched_timer);
+	prefetch(&ts->last_tick);
+#endif
 
 	if (now >= expires)
 		expires = tick_forward_now(expires, now);
