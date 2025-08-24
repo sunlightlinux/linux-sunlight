@@ -12,6 +12,7 @@
 #include <linux/delay.h>
 #include <linux/export.h>
 #include <linux/irq.h>
+#include <linux/prefetch.h>
 
 #include <asm/irq_stack.h>
 #include <asm/apic.h>
@@ -38,7 +39,7 @@ EXPORT_PER_CPU_SYMBOL(__softirq_pending);
 
 DEFINE_PER_CPU_CACHE_HOT(struct irq_stack *, hardirq_stack_ptr);
 
-atomic_t irq_err_count;
+atomic_t irq_err_count ____cacheline_aligned;
 
 /*
  * 'what should we do if we get a hw irq event on an illegal vector'.
@@ -46,7 +47,8 @@ atomic_t irq_err_count;
  */
 void ack_bad_irq(unsigned int irq)
 {
-	if (printk_ratelimit())
+	/* For ULL, minimize printk overhead in interrupt context */
+	if (unlikely(printk_ratelimit()))
 		pr_err("unexpected IRQ trap at vector %02x\n", irq);
 
 	/*
@@ -62,6 +64,17 @@ void ack_bad_irq(unsigned int irq)
 }
 
 #define irq_stats(x)		(&per_cpu(irq_stat, x))
+
+/* ULL optimization: inline hot IRQ stat updates */
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+#define inc_irq_stat_fast(member) \
+	do { \
+		prefetch(&this_cpu_ptr(&irq_stat)->member); \
+		this_cpu_inc(irq_stat.member); \
+	} while (0)
+#else
+#define inc_irq_stat_fast(member) inc_irq_stat(member)
+#endif
 /*
  * /proc/interrupts printing for arch specific interrupts
  */
@@ -250,6 +263,12 @@ u64 arch_irq_stat(void)
 static __always_inline void handle_irq(struct irq_desc *desc,
 				       struct pt_regs *regs)
 {
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+	/* ULL: Prefetch handler function for better cache locality */
+	if (likely(desc->action))
+		prefetch(desc->action->handler);
+#endif
+
 	if (IS_ENABLED(CONFIG_X86_64))
 		generic_handle_irq_desc(desc);
 	else
@@ -260,9 +279,11 @@ static struct irq_desc *reevaluate_vector(int vector)
 {
 	struct irq_desc *desc = __this_cpu_read(vector_irq[vector]);
 
-	if (!IS_ERR_OR_NULL(desc))
+	/* Fast path: valid descriptor found */
+	if (likely(!IS_ERR_OR_NULL(desc)))
 		return desc;
 
+	/* Slow path: handle error cases */
 	if (desc == VECTOR_UNUSED)
 		pr_emerg_ratelimited("No irq handler for %d.%u\n", smp_processor_id(), vector);
 	else
@@ -274,7 +295,16 @@ static __always_inline bool call_irq_handler(int vector, struct pt_regs *regs)
 {
 	struct irq_desc *desc = __this_cpu_read(vector_irq[vector]);
 
+	/* Aggressive prefetch for ULL interrupt processing */
 	if (likely(!IS_ERR_OR_NULL(desc))) {
+		prefetch(desc);
+		prefetch(&desc->irq_data);
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+		/* For ULL, prefetch critical fields that will be accessed */
+		prefetch(&desc->action);
+		prefetch(&desc->irq_data.chip);
+		prefetch(&desc->lock);
+#endif
 		handle_irq(desc, regs);
 		return true;
 	}
@@ -322,6 +352,19 @@ DEFINE_IDTENTRY_IRQ(common_interrupt)
 	/* entry code tells RCU that we're not quiescent.  Check it. */
 	RCU_LOCKDEP_WARN(!rcu_is_watching(), "IRQ failed to wake up RCU");
 
+	/* Aggressive prefetch for ULL: prefetch vector_irq and likely next vectors */
+	{
+		struct irq_desc **vector_ptr = this_cpu_ptr(vector_irq);
+		prefetch(&vector_ptr[vector]);
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+		/* For ULL systems, speculatively prefetch adjacent vector entries */
+		if (likely(vector < NR_VECTORS - 1))
+			prefetch(&vector_ptr[vector + 1]);
+		/* Prefetch IRQ statistics for likely inc_irq_stat() calls */
+		prefetch(this_cpu_ptr(&irq_stat));
+#endif
+	}
+
 	if (unlikely(!call_irq_handler(vector, regs)))
 		apic_eoi();
 
@@ -340,7 +383,7 @@ DEFINE_IDTENTRY_SYSVEC(sysvec_x86_platform_ipi)
 
 	apic_eoi();
 	trace_x86_platform_ipi_entry(X86_PLATFORM_IPI_VECTOR);
-	inc_irq_stat(x86_platform_ipis);
+	inc_irq_stat_fast(x86_platform_ipis);
 	if (x86_platform_ipi_callback)
 		x86_platform_ipi_callback();
 	trace_x86_platform_ipi_exit(X86_PLATFORM_IPI_VECTOR);
@@ -369,7 +412,7 @@ EXPORT_SYMBOL_GPL(kvm_set_posted_intr_wakeup_handler);
 DEFINE_IDTENTRY_SYSVEC_SIMPLE(sysvec_kvm_posted_intr_ipi)
 {
 	apic_eoi();
-	inc_irq_stat(kvm_posted_intr_ipis);
+	inc_irq_stat_fast(kvm_posted_intr_ipis);
 }
 
 /*
@@ -418,8 +461,14 @@ static __always_inline bool handle_pending_pir(unsigned long *pir, struct pt_reg
 	unsigned long pir_copy[NR_PIR_WORDS];
 	int vec = FIRST_EXTERNAL_VECTOR;
 
+	/* Prefetch PIR data for better cache performance */
+	prefetch(pir);
+
 	if (!pi_harvest_pir(pir, pir_copy))
 		return false;
+
+	/* Prefetch pir_copy for the upcoming loop */
+	prefetch(pir_copy);
 
 	for_each_set_bit_from(vec, pir_copy, FIRST_SYSTEM_VECTOR)
 		call_irq_handler(vec, regs);
@@ -429,9 +478,47 @@ static __always_inline bool handle_pending_pir(unsigned long *pir, struct pt_reg
 
 /*
  * Performance data shows that 3 is good enough to harvest 90+% of the benefit
- * on high IRQ rate workload.
+ * on high IRQ rate workload. For ultra-low latency systems, reduce to 2 or 1
+ * to minimize interrupt processing time and reduce maximum latency spikes.
  */
+#if defined(CONFIG_PREEMPT_RT) || defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL) || defined(CONFIG_HZ_300) || defined(CONFIG_PREEMPT_VOLUNTARY)
+#define MAX_POSTED_MSI_COALESCING_LOOP 2
+#else
 #define MAX_POSTED_MSI_COALESCING_LOOP 3
+#endif
+
+/*
+ * For extreme ultra-low latency (trading throughput for latency),
+ * reduce coalescing on critical systems via kernel command line:
+ * - irq_coalesce=minimal  : 2 loops (reduced coalescing)
+ * - irq_coalesce=disabled : 1 loop  (minimal processing, extreme ULL)
+ */
+static int irq_coalesce_mode = 0; /* 0=default, 1=minimal, 2=disabled */
+
+static int __init irq_coalesce_setup(char *str)
+{
+	if (!strcmp(str, "minimal"))
+		irq_coalesce_mode = 1;  /* 2 loops */
+	else if (!strcmp(str, "disabled"))
+		irq_coalesce_mode = 2;  /* 1 loop */
+	return 1;
+}
+__setup("irq_coalesce=", irq_coalesce_setup);
+
+/* Dynamic coalescing based on boot parameter */
+static inline int get_msi_coalescing_loop_count(void)
+{
+	if (irq_coalesce_mode == 2)
+		return 1; /* disabled - absolute minimum processing */
+	if (irq_coalesce_mode == 1)
+		return 2; /* minimal - reduced but some coalescing */
+
+#if defined(CONFIG_PREEMPT_RT) || defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL) || defined(CONFIG_HZ_300) || defined(CONFIG_PREEMPT_VOLUNTARY)
+	return 2;
+#else
+	return 3;
+#endif
+}
 
 /*
  * For MSIs that are delivered as posted interrupts, the CPU notifications
@@ -445,16 +532,23 @@ DEFINE_IDTENTRY_SYSVEC(sysvec_posted_msi_notification)
 
 	pid = this_cpu_ptr(&posted_msi_pi_desc);
 
-	inc_irq_stat(posted_msi_notification_count);
+	/* ULL optimization: prefetch PI descriptor fields */
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+	prefetch(&pid->pir);
+	prefetch(&pid->control);
+#endif
+
+	inc_irq_stat_fast(posted_msi_notification_count);
 	irq_enter();
 
 	/*
 	 * Max coalescing count includes the extra round of handle_pending_pir
-	 * after clearing the outstanding notification bit. Hence, at most
-	 * MAX_POSTED_MSI_COALESCING_LOOP - 1 loops are executed here.
+	 * after clearing the outstanding notification bit. Dynamic coalescing
+	 * allows runtime tuning for ultra-low latency requirements.
 	 */
-	while (++i < MAX_POSTED_MSI_COALESCING_LOOP) {
-		if (!handle_pending_pir(pid->pir, regs))
+	int max_loops = get_msi_coalescing_loop_count();
+	while (likely(++i < max_loops)) {
+		if (unlikely(!handle_pending_pir(pid->pir, regs)))
 			break;
 	}
 
