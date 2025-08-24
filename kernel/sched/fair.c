@@ -169,6 +169,14 @@ static unsigned int sysctl_sched_cfs_bandwidth_slice		= 5000UL;
 #ifdef CONFIG_NUMA_BALANCING
 /* Restrict the NUMA promotion throughput (MB/s) for each target node. */
 static unsigned int sysctl_numa_balancing_promote_rate_limit = 65536;
+
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+/* ULL optimization: More aggressive NUMA balancing for latency-sensitive systems */
+static unsigned int ull_numa_scan_period_min = 500;   /* Faster scanning */
+static unsigned int ull_numa_scan_size = 512;         /* Larger scan size */
+static unsigned int ull_numa_scan_delay = 250;        /* Reduced delay */
+static unsigned int ull_numa_hot_threshold = 250;     /* Lower threshold */
+#endif
 #endif
 
 #ifdef CONFIG_SYSCTL
@@ -1589,7 +1597,14 @@ static unsigned int task_nr_scan_windows(struct task_struct *p)
 
 static unsigned int task_scan_min(struct task_struct *p)
 {
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+	/* ULL optimization: Use more aggressive NUMA scanning parameters */
+	unsigned int scan_size = READ_ONCE(ull_numa_scan_size);
+	unsigned int scan_period_min = ull_numa_scan_period_min;
+#else
 	unsigned int scan_size = READ_ONCE(sysctl_numa_balancing_scan_size);
+	unsigned int scan_period_min = sysctl_numa_balancing_scan_period_min;
+#endif
 	unsigned int scan, floor;
 	unsigned int windows = 1;
 
@@ -1597,7 +1612,7 @@ static unsigned int task_scan_min(struct task_struct *p)
 		windows = MAX_SCAN_WINDOW / scan_size;
 	floor = 1000 / windows;
 
-	scan = sysctl_numa_balancing_scan_period_min / task_nr_scan_windows(p);
+	scan = scan_period_min / task_nr_scan_windows(p);
 	return max_t(unsigned int, floor, scan);
 }
 
@@ -2013,8 +2028,14 @@ bool should_numa_migrate_memory(struct task_struct *p, struct folio *folio,
 			return true;
 		}
 
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+		/* ULL optimization: Use more aggressive hot threshold */
+		def_th = ull_numa_hot_threshold;
+#else
 		def_th = sysctl_numa_balancing_hot_threshold;
-		rate_limit = MB_TO_PAGES(sysctl_numa_balancing_promote_rate_limit);
+#endif
+		rate_limit = sysctl_numa_balancing_promote_rate_limit << \
+			(20 - PAGE_SHIFT);
 		numa_promotion_adjust_threshold(pgdat, rate_limit, def_th);
 
 		th = pgdat->nbp_threshold ? : def_th;
@@ -3403,8 +3424,14 @@ static void task_numa_work(struct callback_head *work)
 	}
 
 	if (!mm->numa_next_scan) {
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+		/* ULL optimization: Reduced NUMA scan delay for faster balancing */
+		mm->numa_next_scan = now +
+			msecs_to_jiffies(ull_numa_scan_delay);
+#else
 		mm->numa_next_scan = now +
 			msecs_to_jiffies(sysctl_numa_balancing_scan_delay);
+#endif
 	}
 
 	/*
