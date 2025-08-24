@@ -5306,6 +5306,14 @@ static __always_inline struct rq *
 context_switch(struct rq *rq, struct task_struct *prev,
 	       struct task_struct *next, struct rq_flags *rf)
 {
+	/*
+	 * ULL optimization: prefetch critical data structures early
+	 * to minimize cache misses during context switch hot path
+	 */
+	prefetch(&next->se);
+	prefetch(&next->thread_info);
+	prefetch(&rq->curr);
+
 	prepare_task_switch(rq, prev, next);
 
 	/*
@@ -5322,7 +5330,7 @@ context_switch(struct rq *rq, struct task_struct *prev,
 	 * kernel ->   user   switch + mmdrop_lazy_tlb() active
 	 *   user ->   user   switch
 	 */
-	if (!next->mm) {				// to kernel
+	if (likely(!next->mm)) {                        // to kernel
 		enter_lazy_tlb(prev->active_mm, next);
 
 		next->active_mm = prev->active_mm;
@@ -5330,7 +5338,11 @@ context_switch(struct rq *rq, struct task_struct *prev,
 			mmgrab_lazy_tlb(prev->active_mm);
 		else
 			prev->active_mm = NULL;
-	} else {					// to user
+	} else {                                        // to user
+		/* ULL optimization: prefetch user MM structures */
+		prefetch(next->mm);
+		prefetch(&next->mm->mmap_base);
+
 		membarrier_switch_mm(rq, prev->active_mm, next->mm);
 		/*
 		 * sys_membarrier() requires an smp_mb() between setting
@@ -5343,7 +5355,7 @@ context_switch(struct rq *rq, struct task_struct *prev,
 		switch_mm_irqs_off(prev->active_mm, next->mm, next);
 		lru_gen_use_mm(next->mm);
 
-		if (!prev->mm) {			// from kernel
+		if (unlikely(!prev->mm)) {              // from kernel
 			/* will mmdrop_lazy_tlb() in finish_task_switch(). */
 			rq->prev_mm = prev->active_mm;
 			prev->active_mm = NULL;
