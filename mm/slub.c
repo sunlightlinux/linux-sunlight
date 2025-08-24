@@ -4590,7 +4590,7 @@ static void *___slab_alloc(struct kmem_cache *s, gfp_t gfpflags, int node,
 	struct partial_context pc;
 	bool try_thisnode = true;
 
-#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_HZ_858) || defined(CONFIG_NO_HZ_FULL)
 	/* ULL optimization: Prefetch cache data structures */
 	prefetch(c);
 	prefetch(&s->cpu_slab);
@@ -5003,7 +5003,7 @@ redo:
 			goto redo;
 		}
 		prefetch_freepointer(s, next_object);
-#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_HZ_858) || defined(CONFIG_NO_HZ_FULL)
 		/* ULL optimization: Aggressive prefetch for next allocation */
 		if (likely(next_object)) {
 			prefetch((char *)next_object + s->object_size);
