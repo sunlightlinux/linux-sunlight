@@ -130,8 +130,12 @@ static void rcu_nocb_bypass_unlock(struct rcu_data *rdp)
 static void rcu_nocb_lock(struct rcu_data *rdp)
 {
 	lockdep_assert_irqs_disabled();
-	if (!rcu_rdp_is_offloaded(rdp))
+	if (likely(!rcu_rdp_is_offloaded(rdp)))
 		return;
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_HZ_858) || defined(CONFIG_NO_HZ_FULL)
+	/* ULL optimization: prefetch nocb_lock for faster acquisition */
+	prefetch(&rdp->nocb_lock);
+#endif
 	raw_spin_lock(&rdp->nocb_lock);
 }
 
