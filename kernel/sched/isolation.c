@@ -111,9 +111,15 @@ EXPORT_SYMBOL_GPL(housekeeping_affine);
 
 bool housekeeping_test_cpu(int cpu, enum hk_type type)
 {
-	if (static_branch_unlikely(&housekeeping_overridden) &&
-	    READ_ONCE(housekeeping.flags) & BIT(type))
-		return cpumask_test_cpu(cpu, housekeeping_cpumask(type));
+	if (static_branch_unlikely(&housekeeping_overridden)) {
+		if (likely(READ_ONCE(housekeeping.flags) & BIT(type))) {
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_HZ_858) || defined(CONFIG_NO_HZ_FULL)
+			/* ULL optimization: prefetch housekeeping cpumask for faster lookup */
+			prefetch(housekeeping_cpumask(type));
+#endif
+			return cpumask_test_cpu(cpu, housekeeping_cpumask(type));
+		}
+	}
 	return true;
 }
 EXPORT_SYMBOL_GPL(housekeeping_test_cpu);
