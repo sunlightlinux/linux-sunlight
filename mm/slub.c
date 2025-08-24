@@ -15,6 +15,7 @@
 #include <linux/mm.h>
 #include <linux/swap.h> /* mm_account_reclaimed_pages() */
 #include <linux/module.h>
+#include <linux/prefetch.h>
 #include <linux/bit_spinlock.h>
 #include <linux/interrupt.h>
 #include <linux/swab.h>
