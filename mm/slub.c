@@ -13,6 +13,7 @@
 #include <linux/mm.h>
 #include <linux/swap.h> /* mm_account_reclaimed_pages() */
 #include <linux/module.h>
+#include <linux/prefetch.h>
 #include <linux/bit_spinlock.h>
 #include <linux/interrupt.h>
 #include <linux/swab.h>
@@ -3732,6 +3733,12 @@ static void *___slab_alloc(struct kmem_cache *s, gfp_t gfpflags, int node,
 	struct partial_context pc;
 	bool try_thisnode = true;
 
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+	/* ULL optimization: Prefetch cache data structures */
+	prefetch(c);
+	prefetch(&s->cpu_slab);
+#endif
+
 	stat(s, ALLOC_SLOWPATH);
 
 reread_slab:
@@ -4087,6 +4094,12 @@ redo:
 			goto redo;
 		}
 		prefetch_freepointer(s, next_object);
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+		/* ULL optimization: Aggressive prefetch for next allocation */
+		if (likely(next_object)) {
+			prefetch((char *)next_object + s->object_size);
+		}
+#endif
 		stat(s, ALLOC_FASTPATH);
 	}
 
