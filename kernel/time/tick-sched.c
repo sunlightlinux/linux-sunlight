@@ -313,7 +313,7 @@ static enum hrtimer_restart tick_nohz_handler(struct hrtimer *timer)
 	struct pt_regs *regs = get_irq_regs();
 	ktime_t now = ktime_get();
 
-#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_HZ_858) || defined(CONFIG_NO_HZ_FULL)
 	/* ULL optimization: Prefetch tick_sched structure for upcoming operations */
 	prefetch(&ts->last_jiffies);
 	prefetch(&ts->next_tick);
@@ -394,7 +394,7 @@ static bool can_stop_full_tick(int cpu, struct tick_sched *ts)
 {
 	lockdep_assert_irqs_disabled();
 
-#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_HZ_858) || defined(CONFIG_NO_HZ_FULL)
 	/* ULL optimization: Prefetch dependency structures for faster checks */
 	prefetch(&tick_dep_mask);
 	prefetch(&ts->tick_dep_mask);
@@ -877,7 +877,7 @@ EXPORT_SYMBOL_GPL(get_cpu_iowait_time_us);
 
 static void tick_nohz_restart(struct tick_sched *ts, ktime_t now)
 {
-#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_HZ_858) || defined(CONFIG_NO_HZ_FULL)
 	/* ULL optimization: Prefetch timer structure for restart operations */
 	prefetch(&ts->sched_timer);
 	prefetch(&ts->last_tick);
