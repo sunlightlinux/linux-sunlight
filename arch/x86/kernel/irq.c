@@ -172,7 +172,7 @@ void irq_stat_inc_and_enable(enum irq_stat_counts which)
 }
 
 /* ULL optimization: inline hot IRQ stat updates */
-#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_HZ_858) || defined(CONFIG_NO_HZ_FULL)
 #define inc_irq_stat_fast(index)						\
 	do {									\
 		prefetch(&this_cpu_ptr(&irq_stat)->counts[IRQ_COUNT_##index]);	\
@@ -218,7 +218,7 @@ u64 arch_irq_stat_cpu(unsigned int cpu)
 static __always_inline void handle_irq(struct irq_desc *desc,
 				       struct pt_regs *regs)
 {
-#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_HZ_858) || defined(CONFIG_NO_HZ_FULL)
 	/* ULL: Prefetch handler function for better cache locality */
 	if (likely(desc->action))
 		prefetch(desc->action->handler);
@@ -254,7 +254,7 @@ static __always_inline bool call_irq_handler(int vector, struct pt_regs *regs)
 	if (likely(!IS_ERR_OR_NULL(desc))) {
 		prefetch(desc);
 		prefetch(&desc->irq_data);
-#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_HZ_858) || defined(CONFIG_NO_HZ_FULL)
 		/* For ULL, prefetch critical fields that will be accessed */
 		prefetch(&desc->action);
 		prefetch(&desc->irq_data.chip);
@@ -311,7 +311,7 @@ DEFINE_IDTENTRY_IRQ(common_interrupt)
 	{
 		struct irq_desc **vector_ptr = this_cpu_ptr(vector_irq);
 		prefetch(&vector_ptr[vector]);
-#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_HZ_858) || defined(CONFIG_NO_HZ_FULL)
 		/* For ULL systems, speculatively prefetch adjacent vector entries */
 		if (likely(vector < NR_VECTORS - 1))
 			prefetch(&vector_ptr[vector + 1]);
@@ -466,7 +466,7 @@ static __always_inline bool handle_pending_pir(unsigned long *pir, struct pt_reg
  * on high IRQ rate workload. For ultra-low latency systems, reduce to 2 or 1
  * to minimize interrupt processing time and reduce maximum latency spikes.
  */
-#if defined(CONFIG_PREEMPT_RT) || defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL) || defined(CONFIG_HZ_300) || defined(CONFIG_PREEMPT_VOLUNTARY)
+#if defined(CONFIG_PREEMPT_RT) || defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_HZ_858) || defined(CONFIG_NO_HZ_FULL) || defined(CONFIG_HZ_300) || defined(CONFIG_PREEMPT_VOLUNTARY)
 #define MAX_POSTED_MSI_COALESCING_LOOP 2
 #else
 #define MAX_POSTED_MSI_COALESCING_LOOP 3
@@ -498,7 +498,7 @@ static inline int get_msi_coalescing_loop_count(void)
 	if (irq_coalesce_mode == 1)
 		return 2; /* minimal - reduced but some coalescing */
 
-#if defined(CONFIG_PREEMPT_RT) || defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL) || defined(CONFIG_HZ_300) || defined(CONFIG_PREEMPT_VOLUNTARY)
+#if defined(CONFIG_PREEMPT_RT) || defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_HZ_858) || defined(CONFIG_NO_HZ_FULL) || defined(CONFIG_HZ_300) || defined(CONFIG_PREEMPT_VOLUNTARY)
 	return 2;
 #else
 	return 3;
@@ -515,7 +515,7 @@ DEFINE_IDTENTRY_SYSVEC(sysvec_posted_msi_notification)
 	struct pt_regs *old_regs = set_irq_regs(regs);
 
 	/* ULL optimization: prefetch PI descriptor fields */
-#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_HZ_858) || defined(CONFIG_NO_HZ_FULL)
 	prefetch(&pid->pir);
 	prefetch(&pid->control);
 #endif
