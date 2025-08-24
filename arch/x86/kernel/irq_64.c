@@ -27,7 +27,7 @@
 #include <asm/apic.h>
 
 DEFINE_PER_CPU_CACHE_HOT(bool, hardirq_stack_inuse);
-DEFINE_PER_CPU_PAGE_ALIGNED(struct irq_stack, irq_stack_backing_store) __visible;
+DEFINE_PER_CPU_PAGE_ALIGNED(struct irq_stack, irq_stack_backing_store) __visible ____cacheline_aligned;
 
 #ifdef CONFIG_VMAP_STACK
 /*
