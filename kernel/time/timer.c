@@ -2350,11 +2350,16 @@ static inline void __run_timers(struct timer_base *base)
 
 	lockdep_assert_held(&base->lock);
 
-	if (base->running_timer)
+	if (unlikely(base->running_timer))
 		return;
 
-	while (time_after_eq(jiffies, base->clk) &&
-	       time_after_eq(jiffies, base->next_expiry)) {
+	/* ULL optimization: prefetch timer collection structures */
+	prefetch(heads);
+	prefetch(&base->vectors);
+	prefetch(&base->next_expiry);
+
+	while (likely(time_after_eq(jiffies, base->clk)) &&
+	       likely(time_after_eq(jiffies, base->next_expiry))) {
 		levels = collect_expired_timers(base, heads);
 		/*
 		 * The two possible reasons for not finding any expired
@@ -2372,16 +2377,24 @@ static inline void __run_timers(struct timer_base *base)
 		base->clk++;
 		timer_recalc_next_expiry(base);
 
-		while (levels--)
+		/* ULL batch processing: prefetch next level during current processing */
+		while (levels--) {
+			if (likely(levels > 0))
+				prefetch(heads + levels - 1);
 			expire_timers(base, heads + levels);
+		}
 	}
 }
 
 static void __run_timer_base(struct timer_base *base)
 {
 	/* Can race against a remote CPU updating next_expiry under the lock */
-	if (time_before(jiffies, READ_ONCE(base->next_expiry)))
+	if (likely(time_before(jiffies, READ_ONCE(base->next_expiry))))
 		return;
+
+	/* ULL optimization: prefetch base structure before lock acquisition */
+	prefetch(&base->lock);
+	prefetch(&base->running_timer);
 
 	timer_base_lock_expiry(base);
 	raw_spin_lock_irq(&base->lock);
@@ -2418,9 +2431,19 @@ static __latent_entropy void run_timer_softirq(void)
 static void run_local_timers(void)
 {
 	struct timer_base *base = this_cpu_ptr(&timer_bases[BASE_LOCAL]);
+	bool need_softirq = false;
+
+	/* ULL optimization: prefetch timer base structures */
+	prefetch(this_cpu_ptr(&timer_bases[BASE_LOCAL]));
+	prefetch(this_cpu_ptr(&timer_bases[BASE_GLOBAL]));
 
 	hrtimer_run_queues();
 
+	/*
+	 * ULL batch processing optimization: instead of raising softirq
+	 * immediately on first expired timer, check all bases first to
+	 * minimize interrupt overhead through batching
+	 */
 	for (int i = 0; i < NR_BASES; i++, base++) {
 		/*
 		 * Raise the softirq only if required.
@@ -2455,12 +2478,14 @@ static void run_local_timers(void)
 		 * Possible remote writers are using WRITE_ONCE(). Local reader
 		 * uses therefore READ_ONCE().
 		 */
-		if (time_after_eq(jiffies, READ_ONCE(base->next_expiry)) ||
-		    (i == BASE_DEF && tmigr_requires_handle_remote())) {
-			raise_timer_softirq(TIMER_SOFTIRQ);
-			return;
+		if (likely(time_after_eq(jiffies, READ_ONCE(base->next_expiry)) ||
+		           (i == BASE_DEF && tmigr_requires_handle_remote()))) {
+			need_softirq = true;
 		}
 	}
+
+	if (unlikely(need_softirq))
+		raise_timer_softirq(TIMER_SOFTIRQ);
 }
 
 /*
