@@ -9359,13 +9359,22 @@ static void sched_change_group(struct task_struct *tsk, struct task_group *group
 
 static struct task_group *sched_needs_group_change(struct task_struct *tsk)
 {
-	struct task_group *new_group;
+	struct task_group *new_group, *current_group;
+
+	/* Cache current group to reduce pointer dereferences */
+	current_group = tsk->sched_task_group;
+
+	/* Prefetch task group structures for better cache performance */
+	if (likely(current_group))
+		prefetch(current_group);
 
 	new_group = sched_get_task_group(tsk);
 
-	if (likely(new_group == tsk->sched_task_group))
+	if (likely(new_group == current_group))
 		return NULL;
 
+	/* Prefetch new group structures */
+	prefetch(new_group);
 	return new_group;
 }
 
@@ -9386,8 +9395,17 @@ void sched_move_task(struct task_struct *tsk, bool for_autogroup)
 	if (!(new_group = sched_needs_group_change(tsk)))
 		return;
 
+	/* Prefetch task structure for upcoming operations */
+	prefetch(&tsk->se);
+	prefetch(&tsk->se.cfs_rq);
+
 	CLASS(task_rq_lock, rq_guard)(tsk);
 	rq = rq_guard.rq;
+
+	/* Prefetch runqueue structures for better cache performance */
+	prefetch(&rq->cfs);
+	prefetch(&rq->rt);
+	prefetch(&rq->dl);
 
 	update_rq_clock(rq);
 

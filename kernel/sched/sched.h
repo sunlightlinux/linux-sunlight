@@ -682,13 +682,13 @@ struct balance_callback {
 
 /* CFS-related fields in a runqueue */
 struct cfs_rq {
-	struct load_weight	load;
+	struct load_weight	load ____cacheline_aligned;
 	unsigned int		nr_queued;
 	unsigned int		h_nr_queued;       /* SCHED_{NORMAL,BATCH,IDLE} */
 	unsigned int		h_nr_runnable;     /* SCHED_{NORMAL,BATCH,IDLE} */
 	unsigned int		h_nr_idle; /* SCHED_IDLE */
 
-	s64			sum_w_vruntime;
+	s64			sum_w_vruntime ____cacheline_aligned;
 	u64			sum_weight;
 
 	u64			zero_vruntime;
@@ -833,8 +833,8 @@ static inline int rt_bandwidth_enabled(void)
 
 /* Real-Time classes' related field in a runqueue: */
 struct rt_rq {
-	struct rt_prio_array	active;
-	unsigned int		rt_nr_running;
+	struct rt_prio_array	active ____cacheline_aligned;
+	unsigned int		rt_nr_running ____cacheline_aligned;
 	unsigned int		rr_nr_running;
 	struct {
 		int		curr; /* highest queued rt task prio */
@@ -1128,8 +1128,9 @@ DECLARE_STATIC_KEY_FALSE(sched_uclamp_used);
  */
 struct rq {
 	/* runqueue lock: */
-	raw_spinlock_t		__lock;
+	raw_spinlock_t		__lock ____cacheline_aligned;
 
+	/* Hot fields - frequently accessed together */
 	unsigned int		nr_running;
 #ifdef CONFIG_NUMA_BALANCING
 	unsigned int		nr_numa_running;
@@ -1154,9 +1155,9 @@ struct rq {
 #define UCLAMP_FLAG_IDLE 0x01
 #endif
 
-	struct cfs_rq		cfs;
-	struct rt_rq		rt;
-	struct dl_rq		dl;
+	struct cfs_rq		cfs ____cacheline_aligned;
+	struct rt_rq		rt ____cacheline_aligned;
+	struct dl_rq		dl ____cacheline_aligned;
 #ifdef CONFIG_SCHED_CLASS_EXT
 	struct scx_rq		scx;
 #endif
@@ -1184,7 +1185,7 @@ struct rq {
 	union {
 		struct task_struct __rcu *donor; /* Scheduler context */
 		struct task_struct __rcu *curr;  /* Execution context */
-	};
+	} ____cacheline_aligned;
 #endif
 	struct sched_dl_entity	*dl_server;
 	struct task_struct	*idle;
@@ -1192,10 +1193,10 @@ struct rq {
 	unsigned long		next_balance;
 	struct mm_struct	*prev_mm;
 
-	unsigned int		clock_update_flags;
+	unsigned int		clock_update_flags ____cacheline_aligned;
 	u64			clock;
 	/* Ensure that all clocks are in the same cache line */
-	u64			clock_task ____cacheline_aligned;
+	u64			clock_task;
 	u64			clock_pelt;
 	unsigned long		lost_idle_time;
 	u64			clock_pelt_idle;
@@ -2308,7 +2309,8 @@ static inline int task_current(struct rq *rq, struct task_struct *p)
  */
 static inline int task_current_donor(struct rq *rq, struct task_struct *p)
 {
-	return rq->donor == p;
+	/* Likely branch optimization for common case */
+	return likely(rq->donor == p);
 }
 
 static inline bool task_is_blocked(struct task_struct *p)
@@ -2326,7 +2328,9 @@ static inline int task_on_cpu(struct rq *rq, struct task_struct *p)
 
 static inline int task_on_rq_queued(struct task_struct *p)
 {
-	return READ_ONCE(p->on_rq) == TASK_ON_RQ_QUEUED;
+	/* Prefetch task structure for better cache performance */
+	prefetch(&p->se);
+	return likely(READ_ONCE(p->on_rq) == TASK_ON_RQ_QUEUED);
 }
 
 static inline int task_on_rq_migrating(struct task_struct *p)
