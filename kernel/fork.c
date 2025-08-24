@@ -188,7 +188,7 @@ void __weak arch_release_task_struct(struct task_struct *tsk)
 
 static struct kmem_cache *task_struct_cachep;
 
-#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_HZ_858) || defined(CONFIG_NO_HZ_FULL)
 /* ULL optimization: per-CPU task_struct pools for reduced allocation latency */
 static DEFINE_PER_CPU(struct task_struct *, ull_task_cache[4]);
 static DEFINE_PER_CPU(int, ull_task_cache_count);
@@ -227,7 +227,7 @@ static bool free_task_struct_ull_fast(struct task_struct *tsk)
 
 static inline struct task_struct *alloc_task_struct_node(int node)
 {
-#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_HZ_858) || defined(CONFIG_NO_HZ_FULL)
 	struct task_struct *tsk = alloc_task_struct_ull_fast(node);
 	if (likely(tsk))
 		return tsk;
@@ -237,7 +237,7 @@ static inline struct task_struct *alloc_task_struct_node(int node)
 
 static inline void free_task_struct(struct task_struct *tsk)
 {
-#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_NO_HZ_FULL)
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_HZ_858) || defined(CONFIG_NO_HZ_FULL)
 	if (likely(free_task_struct_ull_fast(tsk)))
 		return;
 #endif
