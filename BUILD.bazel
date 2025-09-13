@@ -33,6 +33,7 @@ load(
 load(":abi.bzl", "cc_binary_with_abi")
 load(
     ":modules.bzl",
+    "get_gki_kunit_modules",
     "get_gki_modules_list",
     "get_gki_modules_superset",
     "get_gki_unprotected_modules_list",
@@ -249,7 +250,7 @@ common_kernel(
     defconfig = "arch/arm64/configs/gki_defconfig",
     extra_dist = [
         ":test_mappings_zip",
-        ":tests_zip_arm64",
+        ":tests_zip_arm64_16k",
     ],
     generated_headers_for_module = _GENERATED_HEADERS_FOR_MODULE,
     gki_boot_img_sizes = _GKI_AARCH64_BOOT_IMAGE_SIZES,
@@ -984,6 +985,7 @@ kernel_build(
     build_config = "build.config.rockpi4",
     defconfig = "arch/arm64/configs/gki_defconfig",
     dtstree = "//common-modules/virtual-device:rockpi4_dts",
+    generate_out_targets = False,
     kmi_symbol_list_strict_mode = False,
     make_goals = [
         "Image",
@@ -1013,6 +1015,7 @@ kernel_build(
     arch = "arm64",
     build_config = "build.config.rockpi4",
     dtstree = "//common-modules/virtual-device:rockpi4_dts",
+    generate_out_targets = False,
     kmi_symbol_list_strict_mode = False,
     make_goals = [
         "Image",
@@ -1201,6 +1204,7 @@ kernel_build(
     ],
     arch = "arm64",
     defconfig = "arch/arm64/configs/gki_defconfig",
+    generate_out_targets = False,
     make_goals = [
         "Image",
         "modules",
@@ -1232,6 +1236,7 @@ kernel_build(
     ],
     arch = "arm64",
     defconfig = "arch/arm64/configs/gki_defconfig",
+    generate_out_targets = False,
     make_goals = [
         "Image",
         "modules",
@@ -1382,20 +1387,21 @@ pkg_files(
 
 pkg_files(
     name = "kunit_modules_arm64",
-    srcs = [
-        ":kernel_aarch64/" + e
-        for e in get_kunit_modules_list("arm64")
-    ],
+    srcs = get_gki_kunit_modules("arm64", "4k"),
+    prefix = _KUNIT_DIR + "/arm64",
+    visibility = ["//visibility:private"],
+)
+
+pkg_files(
+    name = "kunit_modules_arm64_16k",
+    srcs = get_gki_kunit_modules("arm64", "16k"),
     prefix = _KUNIT_DIR + "/arm64",
     visibility = ["//visibility:private"],
 )
 
 pkg_files(
     name = "kunit_modules_x86_64",
-    srcs = [
-        ":kernel_x86_64/" + e
-        for e in get_kunit_modules_list("x86_64")
-    ],
+    srcs = get_gki_kunit_modules("x86_64"),
     prefix = _KUNIT_DIR + "/x86_64",
     visibility = ["//visibility:private"],
 )
@@ -1404,6 +1410,15 @@ pkg_filegroup(
     name = "kunit_tests_arm64_pkg_files",
     srcs = [
         ":kunit_modules_arm64",
+        ":kunit_tests_config_arm64",
+    ],
+    visibility = ["//visibility:private"],
+)
+
+pkg_filegroup(
+    name = "kunit_tests_arm64_16k_pkg_files",
+    srcs = [
+        ":kunit_modules_arm64_16k",
         ":kunit_tests_config_arm64",
     ],
     visibility = ["//visibility:private"],
@@ -1424,6 +1439,14 @@ pkg_install(
     name = "kunit_tests_arm64",
     srcs = [
         ":kunit_tests_arm64_pkg_files",
+    ],
+    visibility = ["//visibility:private"],
+)
+
+pkg_install(
+    name = "kunit_tests_arm64_16k",
+    srcs = [
+        ":kunit_tests_arm64_16k_pkg_files",
     ],
     visibility = ["//visibility:private"],
 )
@@ -3204,6 +3227,16 @@ pkg_zip(
     ],
     out = "arm64/vts_tests.zip",
     visibility = ["//visibility:private"],
+)
+
+pkg_zip(
+    name = "tests_zip_arm64_16k",
+    srcs = [
+        ":kselftest_tests_arm64_pkg_filegroup",
+        ":kunit_tests_arm64_16k_pkg_files",
+    ],
+    out = "arm64_16k/tests.zip",
+    visibility = ["//visibility:public"],
 )
 
 pkg_files(
