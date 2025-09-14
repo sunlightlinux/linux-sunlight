@@ -426,6 +426,7 @@ amdgpu_userq_create(struct drm_file *filp, union drm_amdgpu_userq *args)
 	if (index == (uint64_t)-EINVAL) {
 		drm_file_err(uq_mgr->file, "Failed to get doorbell for queue\n");
 		kfree(queue);
+		r = -EINVAL;
 		goto unlock;
 	}
 
@@ -664,7 +665,7 @@ static void amdgpu_userq_restore_worker(struct work_struct *work)
 	struct amdgpu_fpriv *fpriv = uq_mgr_to_fpriv(uq_mgr);
 	int ret;
 
-	flush_work(&fpriv->evf_mgr.suspend_work.work);
+	flush_delayed_work(&fpriv->evf_mgr.suspend_work);
 
 	mutex_lock(&uq_mgr->userq_mutex);
 
