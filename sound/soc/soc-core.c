@@ -375,8 +375,9 @@ struct snd_soc_component
 	for_each_component(component) {
 		if ((dev == component->dev) &&
 		    (!driver_name ||
-		     (driver_name == component->driver->name) ||
-		     (strcmp(component->driver->name, driver_name) == 0))) {
+		     (component->driver->name &&
+		      ((component->driver->name == driver_name) ||
+		       (strcmp(component->driver->name, driver_name) == 0))))) {
 			found_component = component;
 			break;
 		}
@@ -1139,6 +1140,9 @@ sanity_check:
 void snd_soc_remove_pcm_runtime(struct snd_soc_card *card,
 				struct snd_soc_pcm_runtime *rtd)
 {
+	if (!rtd)
+		return;
+
 	lockdep_assert_held(&client_mutex);
 
 	/*

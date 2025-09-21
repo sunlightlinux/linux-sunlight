@@ -88,7 +88,7 @@ static long do_sys_name_to_handle(const struct path *path,
 		if (fh_flags & EXPORT_FH_CONNECTABLE) {
 			handle->handle_type |= FILEID_IS_CONNECTABLE;
 			if (d_is_dir(path->dentry))
-				fh_flags |= FILEID_IS_DIR;
+				handle->handle_type |= FILEID_IS_DIR;
 		}
 		retval = 0;
 	}
@@ -201,6 +201,14 @@ static int vfs_dentry_acceptable(void *context, struct dentry *dentry)
 	/* Old permission model with global CAP_DAC_READ_SEARCH. */
 	if (!ctx->flags)
 		return 1;
+
+	/*
+	 * Verify that the decoded dentry itself has a valid id mapping.
+	 * In case the decoded dentry is the mountfd root itself, this
+	 * verifies that the mountfd inode itself has a valid id mapping.
+	 */
+	if (!privileged_wrt_inode_uidgid(user_ns, idmap, d_inode(dentry)))
+		return 0;
 
 	/*
 	 * It's racy as we're not taking rename_lock but we're able to ignore
@@ -404,7 +412,7 @@ static long do_handle_open(int mountdirfd, struct file_handle __user *ufh,
 	if (retval)
 		return retval;
 
-	CLASS(get_unused_fd, fd)(O_CLOEXEC);
+	CLASS(get_unused_fd, fd)(open_flag);
 	if (fd < 0)
 		return fd;
 
