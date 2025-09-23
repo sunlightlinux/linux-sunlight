@@ -724,8 +724,15 @@ void ttm_bo_move_sync_cleanup(struct ttm_buffer_object *bo,
 	int ret;
 
 	ret = ttm_bo_wait_free_node(bo, man->use_tt);
-	if (WARN_ON(ret))
+	if (ret) {
+		/* During GPU recovery or suspend, waiting may fail - handle gracefully */
+		if (ret == -EINTR || ret == -ERESTARTSYS) {
+			pr_debug("ttm_bo_move_sync_cleanup: wait interrupted during suspend/recovery\n");
+		} else {
+			WARN_ON(ret);
+		}
 		return;
+	}
 
 	ttm_bo_assign_mem(bo, new_mem);
 }
