@@ -875,7 +875,8 @@ int hibernate(void)
 				power_down();
 		}
 		in_suspend = 0;
-		pm_restore_gfp_mask();
+		if (hibernation_mode != HIBERNATION_SUSPEND)
+			pm_restore_gfp_mask();
 	} else {
 		pm_pr_dbg("Hibernation image restored successfully.\n");
 	}
