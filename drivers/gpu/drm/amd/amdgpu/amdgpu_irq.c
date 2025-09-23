@@ -636,8 +636,16 @@ int amdgpu_irq_put(struct amdgpu_device *adev, struct amdgpu_irq_src *src,
 	if (!src->enabled_types || !src->funcs->set)
 		return -EINVAL;
 
-	if (WARN_ON(!amdgpu_irq_enabled(adev, src, type)))
-		return -EINVAL;
+	/* During suspend/hibernation, IRQ may already be disabled, handle gracefully */
+	if (!amdgpu_irq_enabled(adev, src, type)) {
+		if (adev->in_suspend || adev->in_s4) {
+			/* IRQ already disabled during suspend, not an error */
+			return 0;
+		} else {
+			WARN_ON(1);
+			return -EINVAL;
+		}
+	}
 
 	if (atomic_dec_and_test(&src->enabled_types[type]))
 		return amdgpu_irq_update(adev, src, type);
