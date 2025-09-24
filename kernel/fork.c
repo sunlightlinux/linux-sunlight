@@ -204,15 +204,20 @@ static struct task_struct *alloc_task_struct_ull_fast(int node)
 	struct task_struct *tsk;
 	int *count = this_cpu_ptr(&ull_task_cache_count);
 
-	if (*count > 0) {
+	if (*count > 0 && *count <= 8) {
 		struct task_struct **cache = this_cpu_ptr(ull_task_cache);
 		(*count)--;
 		tsk = cache[*count];
 		cache[*count] = NULL;
-		/* Prefetch task structure for upcoming initialization */
-		prefetch(tsk);
-		prefetch(&tsk->se);
-		return tsk;
+		/* Validate retrieved pointer */
+		if (likely(tsk && !IS_ERR(tsk))) {
+			/* Prefetch task structure for upcoming initialization */
+			prefetch(tsk);
+			prefetch(&tsk->se);
+			return tsk;
+		}
+		/* Invalid pointer, fix count and fallback */
+		(*count)++;
 	}
 	return NULL;
 }
@@ -220,6 +225,10 @@ static struct task_struct *alloc_task_struct_ull_fast(int node)
 static bool free_task_struct_ull_fast(struct task_struct *tsk)
 {
 	int *count = this_cpu_ptr(&ull_task_cache_count);
+
+	/* Validate input and cache state */
+	if (!tsk || IS_ERR(tsk) || *count < 0 || *count >= 8)
+		return false;
 
 	if (*count < 8) {
 		struct task_struct **cache = this_cpu_ptr(ull_task_cache);
@@ -235,12 +244,16 @@ static struct mm_struct *allocate_mm_ull_fast(void)
 	struct mm_struct *mm;
 	int *count = this_cpu_ptr(&ull_mm_cache_count);
 
-	if (*count > 0) {
+	if (*count > 0 && *count <= 4) {
 		struct mm_struct **cache = this_cpu_ptr(ull_mm_cache);
 		(*count)--;
 		mm = cache[*count];
 		cache[*count] = NULL;
-		return mm;
+		/* Validate retrieved pointer */
+		if (likely(mm && !IS_ERR(mm)))
+			return mm;
+		/* Invalid pointer, fix count and fallback */
+		(*count)++;
 	}
 	return NULL;
 }
@@ -248,6 +261,10 @@ static struct mm_struct *allocate_mm_ull_fast(void)
 static bool free_mm_ull_fast(struct mm_struct *mm)
 {
 	int *count = this_cpu_ptr(&ull_mm_cache_count);
+
+	/* Validate input and cache state */
+	if (!mm || IS_ERR(mm) || *count < 0 || *count >= 4)
+		return false;
 
 	if (*count < 4) {
 		struct mm_struct **cache = this_cpu_ptr(ull_mm_cache);
@@ -972,6 +989,14 @@ void __init fork_init(void)
 
 	/* do the arch specific task caches init */
 	arch_task_cache_init();
+
+#if defined(CONFIG_PREEMPT) || defined(CONFIG_HZ_1000) || defined(CONFIG_HZ_858) || defined(CONFIG_NO_HZ_FULL)
+	/* Initialize ULL per-CPU caches */
+	for_each_possible_cpu(i) {
+		per_cpu(ull_task_cache_count, i) = 0;
+		per_cpu(ull_mm_cache_count, i) = 0;
+	}
+#endif
 
 	set_max_threads(MAX_THREADS);
 
