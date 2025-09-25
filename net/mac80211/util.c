@@ -888,7 +888,10 @@ EXPORT_SYMBOL_GPL(ieee80211_vif_to_wdev);
  */
 static bool ieee80211_can_queue_work(struct ieee80211_local *local)
 {
-	if (local->quiescing || (local->suspended && !local->resuming)) {
+	if (local->quiescing)
+		return false;
+
+	if (local->suspended && !local->resuming) {
 		pr_warn("queueing ieee80211 work while going to suspend\n");
 		return false;
 	}
