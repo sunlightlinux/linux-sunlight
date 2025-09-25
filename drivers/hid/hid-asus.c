@@ -1221,17 +1221,22 @@ static int asus_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	 * HID_CLAIMED_INPUT is set prevents a UAF when all input devices
 	 * were freed during registration due to no usages being mapped,
 	 * leaving drvdata->input pointing to freed memory.
+	 * Skip this check for devices with QUIRK_SKIP_INPUT_MAPPING or
+	 * ROG N-KEY devices which may have interfaces without standard input usages.
 	 */
-	if (!drvdata->input || !(hdev->claimed & HID_CLAIMED_INPUT)) {
+	if (!(drvdata->quirks & (QUIRK_SKIP_INPUT_MAPPING | QUIRK_ROG_NKEY_KEYBOARD)) &&
+	    (!drvdata->input || !(hdev->claimed & HID_CLAIMED_INPUT))) {
 		hid_warn(hdev, "Asus input not registered\n");
 		ret = -ENOMEM;
 		goto err_stop_hw;
 	}
 
-	if (drvdata->tp) {
-		drvdata->input->name = "Asus TouchPad";
-	} else {
-		drvdata->input->name = "Asus Keyboard";
+	if (drvdata->input) {
+		if (drvdata->tp) {
+			drvdata->input->name = "Asus TouchPad";
+		} else {
+			drvdata->input->name = "Asus Keyboard";
+		}
 	}
 
 	if (drvdata->tp) {
