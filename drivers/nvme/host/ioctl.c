@@ -126,7 +126,8 @@ static int nvme_map_user_request(struct request *req, u64 ubuffer,
 	int ret;
 
 	if (!nvme_ctrl_sgl_supported(ctrl))
-		dev_warn_once(ctrl->device, "using unchecked data buffer\n");
+		dev_info_once(ctrl->device,
+			      "controller lacks SGL support, using unchecked data buffer (normal for consumer SSDs)\n");
 	if (has_metadata) {
 		if (!supports_metadata)
 			return -EINVAL;
