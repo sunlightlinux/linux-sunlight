@@ -18,9 +18,45 @@
 #ifdef ACPI_EXEC_APP
 #include "aecommon.h"
 #endif
+#include <linux/dmi.h>
 
 #define _COMPONENT          ACPI_DISPATCHER
 ACPI_MODULE_NAME("dswload2")
+
+/*
+ * Check if we should suppress AE_ALREADY_EXISTS warnings for specific
+ * systems with known DSDT issues
+ */
+static int __init is_asus_ga401qm_s0w_quirk(const char *buffer_ptr, acpi_status status)
+{
+#ifdef CONFIG_DMI
+	static int dmi_checked = 0;
+	static int is_quirk_system = 0;
+
+	/* Only check DMI once per boot */
+	if (!dmi_checked) {
+		const char *product_name = dmi_get_system_info(DMI_PRODUCT_NAME);
+		const char *board_name = dmi_get_system_info(DMI_BOARD_NAME);
+
+		if (product_name && board_name &&
+		    !strcmp(product_name, "ROG Zephyrus G14 GA401QM_GA401QM") &&
+		    !strcmp(board_name, "GA401QM")) {
+			is_quirk_system = 1;
+		}
+		dmi_checked = 1;
+	}
+
+	/* Check if this is the specific _S0W duplicate error on our system */
+	if (is_quirk_system && status == AE_ALREADY_EXISTS && buffer_ptr) {
+		/* Check if the object name ends with _S0W */
+		int len = strlen(buffer_ptr);
+		if (len >= 4 && !strcmp(buffer_ptr + len - 4, "_S0W")) {
+			return 1; /* Suppress warning */
+		}
+	}
+#endif
+	return 0; /* Don't suppress */
+}
 
 /*******************************************************************************
  *
@@ -323,8 +359,11 @@ acpi_ds_load2_begin_op(struct acpi_walk_state *walk_state,
 	}
 
 	if (ACPI_FAILURE(status)) {
-		ACPI_ERROR_NAMESPACE(walk_state->scope_info,
-				     buffer_ptr, status);
+		/* Check if we should suppress this specific warning */
+		if (!is_asus_ga401qm_s0w_quirk(buffer_ptr, status)) {
+			ACPI_ERROR_NAMESPACE(walk_state->scope_info,
+					     buffer_ptr, status);
+		}
 		return_ACPI_STATUS(status);
 	}
 
