@@ -1311,6 +1311,8 @@ static int asus_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	 * HID_CLAIMED_INPUT is set prevents a UAF when all input devices
 	 * were freed during registration due to no usages being mapped,
 	 * leaving drvdata->input pointing to freed memory.
+	 * Skip this check for devices with QUIRK_SKIP_INPUT_MAPPING or
+	 * ROG N-KEY devices which may have interfaces without standard input usages.
 	 */
 	if (drvdata->input && (hdev->claimed & HID_CLAIMED_INPUT)) {
 		if (drvdata->tp)
