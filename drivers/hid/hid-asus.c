@@ -1277,10 +1277,12 @@ static int asus_probe(struct hid_device *hdev, const struct hid_device_id *id)
 		goto err_stop_hw;
 	}
 
-	if (drvdata->tp) {
-		drvdata->input->name = "Asus TouchPad";
-	} else {
-		drvdata->input->name = "Asus Keyboard";
+	if (drvdata->input) {
+		if (drvdata->tp) {
+			drvdata->input->name = "Asus TouchPad";
+		} else {
+			drvdata->input->name = "Asus Keyboard";
+		}
 	}
 
 	if (drvdata->tp) {
