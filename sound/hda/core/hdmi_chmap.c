@@ -354,10 +354,14 @@ static void hdmi_std_setup_channel_mapping(struct hdac_chmap *chmap,
 		int hdmi_slot = 0;
 		/* fill actual channel mappings in ALSA channel (i) order */
 		for (i = 0; i < ch_alloc->channels; i++) {
-			while (!WARN_ON(hdmi_slot >= 8) &&
-			       !ch_alloc->speakers[7 - hdmi_slot])
+			while (hdmi_slot < 8 &&
+			       !ch_alloc->speakers[7 - hdmi_slot]) {
+				if (hdmi_slot >= 8) {
+					pr_warn_once("HDMI: Invalid channel allocation detected (ca=%d, channels=%d)\n",
+						     ca, ch_alloc->channels);
+				}
 				hdmi_slot++; /* skip zero slots */
-
+			}
 			hdmi_channel_mapping[ca][i] = (i << 4) | hdmi_slot++;
 		}
 		/* fill the rest of the slots with ALSA channel 0xf */
