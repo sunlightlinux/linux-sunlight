@@ -54,10 +54,32 @@ void acpi_ns_check_argument_types(struct acpi_evaluate_info *info)
 	for (i = 0; ((i < arg_count) && (i < info->param_count)); i++) {
 		arg_type = METHOD_GET_NEXT_TYPE(arg_type_list);
 		user_arg_type = info->parameters[i]->common.type;
+		u8 type_ok = 0;
 
-		/* No typechecking for ACPI_TYPE_ANY */
+		/*
+		 * Check if user_arg_type matches any of the acceptable types.
+		 * Since arg_type can be an OR-ed combination of multiple types
+		 * (e.g., ACPI_TYPE_ANY | ACPI_TYPE_PACKAGE for _DSM arg #4),
+		 * we need to check each possible type individually.
+		 */
+		if (arg_type & ACPI_TYPE_ANY) {
+			/* ACPI_TYPE_ANY accepts most types */
+			type_ok = 1;
+		} else {
+			/*
+			 * Check if user type matches any of the OR-ed types.
+			 * We test each ACPI type bit that could be set.
+			 */
+			u32 type_mask;
+			for (type_mask = 1; type_mask <= ACPI_TYPE_LOCAL_MAX; type_mask++) {
+				if ((arg_type & type_mask) && (user_arg_type == type_mask)) {
+					type_ok = 1;
+					break;
+				}
+			}
+		}
 
-		if ((user_arg_type != arg_type) && (arg_type != ACPI_TYPE_ANY)) {
+		if (!type_ok) {
 			ACPI_WARN_PREDEFINED((AE_INFO, info->full_pathname,
 					      ACPI_WARN_ALWAYS,
 					      "Argument #%u type mismatch - "
