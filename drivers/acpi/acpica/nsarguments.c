@@ -57,13 +57,22 @@ void acpi_ns_check_argument_types(struct acpi_evaluate_info *info)
 		u8 type_ok = 0;
 
 		/*
+		 * Special case: _DSM argument #4 (index 3) accepts Buffer or Package.
+		 * Many BIOS implementations pass Buffer when spec says Package,
+		 * but both are acceptable for _DSM's flexible argument.
+		 */
+		if (i == 3 && user_arg_type == ACPI_TYPE_BUFFER &&
+		    info->full_pathname && strstr(info->full_pathname, "._DSM")) {
+			type_ok = 1;
+		}
+		/*
 		 * Check if user_arg_type matches any of the acceptable types.
 		 * Since arg_type can be an OR-ed combination of multiple types
 		 * (e.g., ACPI_TYPE_ANY | ACPI_TYPE_PACKAGE for _DSM arg #4),
 		 * we need to check each possible type individually.
 		 */
-		if (arg_type & ACPI_TYPE_ANY) {
-			/* ACPI_TYPE_ANY accepts most types */
+		else if (arg_type == 0) {
+			/* Type 0 (ACPI_TYPE_ANY) accepts all types */
 			type_ok = 1;
 		} else {
 			/*
