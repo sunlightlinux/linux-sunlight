@@ -4217,10 +4217,7 @@ M:	Kent Overstreet <kent.overstreet@linux.dev>
 L:	linux-bcachefs@vger.kernel.org
 S:	Externally maintained
 C:	irc://irc.oftc.net/bcache
-P:      Documentation/filesystems/bcachefs/SubmittingPatches.rst
 T:	git https://evilpiepirate.org/git/bcachefs.git
-F:	fs/bcachefs/
-F:	Documentation/filesystems/bcachefs/
 
 BDISP ST MEDIA DRIVER
 M:	Fabien Dessenne <fabien.dessenne@foss.st.com>
@@ -6481,6 +6478,7 @@ S:	Supported
 T:	git https://git.kernel.org/pub/scm/linux/kernel/git/pcmoore/lsm.git
 F:	include/linux/cred.h
 F:	kernel/cred.c
+F:	rust/kernel/cred.rs
 F:	Documentation/security/credentials.rst
 
 INTEL CRPS COMMON REDUNDANT PSU DRIVER
@@ -9761,11 +9759,14 @@ F:	drivers/video/fbdev/imxfb.c
 
 FREESCALE IMX DDR PMU DRIVER
 M:	Frank Li <Frank.li@nxp.com>
+M:	Xu Yang <xu.yang_2@nxp.com>
 L:	linux-arm-kernel@lists.infradead.org (moderated for non-subscribers)
 S:	Maintained
 F:	Documentation/admin-guide/perf/imx-ddr.rst
 F:	Documentation/devicetree/bindings/perf/fsl-imx-ddr.yaml
 F:	drivers/perf/fsl_imx8_ddr_perf.c
+F:	drivers/perf/fsl_imx9_ddr_perf.c
+F:	tools/perf/pmu-events/arch/arm64/freescale/
 
 FREESCALE IMX I2C DRIVER
 M:	Oleksij Rempel <o.rempel@pengutronix.de>
@@ -10809,8 +10810,10 @@ M:	John Paul Adrian Glaubitz <glaubitz@physik.fu-berlin.de>
 M:	Yangtao Li <frank.li@vivo.com>
 L:	linux-fsdevel@vger.kernel.org
 S:	Maintained
+T:	git git://git.kernel.org/pub/scm/linux/kernel/git/vdubeyko/hfs.git
 F:	Documentation/filesystems/hfs.rst
 F:	fs/hfs/
+F:	include/linux/hfs_common.h
 
 HFSPLUS FILESYSTEM
 M:	Viacheslav Dubeyko <slava@dubeyko.com>
@@ -10818,8 +10821,10 @@ M:	John Paul Adrian Glaubitz <glaubitz@physik.fu-berlin.de>
 M:	Yangtao Li <frank.li@vivo.com>
 L:	linux-fsdevel@vger.kernel.org
 S:	Maintained
+T:	git git://git.kernel.org/pub/scm/linux/kernel/git/vdubeyko/hfs.git
 F:	Documentation/filesystems/hfsplus.rst
 F:	fs/hfsplus/
+F:	include/linux/hfs_common.h
 
 HGA FRAMEBUFFER DRIVER
 M:	Ferenc Bakonyi <fero@drama.obuda.kando.hu>
@@ -11077,7 +11082,6 @@ F:	Documentation/devicetree/bindings/net/hisilicon*.txt
 F:	drivers/net/ethernet/hisilicon/
 
 HISILICON PMU DRIVER
-M:	Yicong Yang <yangyicong@hisilicon.com>
 M:	Jonathan Cameron <jonathan.cameron@huawei.com>
 S:	Supported
 W:	http://www.hisilicon.com
@@ -22828,6 +22832,7 @@ F:	include/linux/security.h
 F:	include/uapi/linux/lsm.h
 F:	security/
 F:	tools/testing/selftests/lsm/
+F:	rust/kernel/security.rs
 X:	security/selinux/
 K:	\bsecurity_[a-z_0-9]\+\b
 
