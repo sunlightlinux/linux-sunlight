@@ -26,10 +26,6 @@
 /* Threshold for detecting small packets to copy */
 #define GOOD_COPY_LEN  128
 
-uint virtio_transport_max_vsock_pkt_buf_size = 64 * 1024;
-module_param(virtio_transport_max_vsock_pkt_buf_size, uint, 0444);
-EXPORT_SYMBOL_GPL(virtio_transport_max_vsock_pkt_buf_size);
-
 static void virtio_transport_cancel_close_work(struct vsock_sock *vsk,
 					       bool cancel_timeout);
 
@@ -334,7 +330,24 @@ out:
 static int virtio_transport_send_pkt_info(struct vsock_sock *vsk,
 					  struct virtio_vsock_pkt_info *info)
 {
-	u32 max_skb_len = VIRTIO_VSOCK_MAX_PKT_BUF_SIZE;
+	/* ANDROID:
+	 *
+	 * Older host kernels (including the 5.10-based images used by
+	 * Cuttlefish) only support linear SKBs on the RX path.
+	 * Consequently, if we transmit a VIRTIO_VSOCK_MAX_PKT_BUF_SIZE
+	 * packet, the host allocation can fail and the packet will be
+	 * silently dropped.
+	 *
+	 * As a nasty workaround, limit the entire SKB to ~28KiB, which
+	 * allows for 4KiB of SKB wiggle room whilst keeping the
+	 * allocation below PAGE_ALLOC_COSTLY_ORDER.
+	 *
+	 * This can be removed when all supported host kernels have
+	 * support for non-linear RX buffers introduced by Change-Id
+	 * I4212a8daf9f19b5bbffc06ce93338c823de7bb19.
+	 */
+	u32 max_skb_len = min_t(u32, VIRTIO_VSOCK_MAX_PKT_BUF_SIZE,
+				SKB_WITH_OVERHEAD(SZ_32K - VIRTIO_VSOCK_SKB_HEADROOM) - SZ_4K);
 	u32 src_cid, src_port, dst_cid, dst_port;
 	const struct virtio_transport *t_ops;
 	struct virtio_vsock_sock *vvs;
@@ -379,7 +392,7 @@ static int virtio_transport_send_pkt_info(struct vsock_sock *vsk,
 			can_zcopy = virtio_transport_can_zcopy(t_ops, info, pkt_len);
 
 		if (can_zcopy)
-			max_skb_len = min_t(u32, VIRTIO_VSOCK_MAX_PKT_BUF_SIZE,
+			max_skb_len = min_t(u32, max_skb_len,
 					    (MAX_SKB_FRAGS * PAGE_SIZE));
 	}
 

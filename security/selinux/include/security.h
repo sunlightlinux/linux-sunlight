@@ -97,8 +97,6 @@ struct selinux_state {
 #endif
 	bool initialized;
 	bool policycap[__POLICYDB_CAP_MAX];
-	bool android_netlink_route;
-	bool android_netlink_getneigh;
 
 	struct page *status_page;
 	struct mutex status_lock;
@@ -412,6 +410,5 @@ extern void avtab_cache_init(void);
 extern void ebitmap_cache_init(void);
 extern void hashtab_cache_init(void);
 extern int security_sidtab_hash_stats(char *page);
-extern void selinux_nlmsg_init(void);
 
 #endif /* _SELINUX_SECURITY_H_ */
