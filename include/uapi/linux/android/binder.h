@@ -47,21 +47,7 @@ enum flat_binder_object_shifts {
 	FLAT_BINDER_FLAG_SCHED_POLICY_SHIFT = 9,
 };
 
-/**
- * enum flat_binder_object_flags - flags for use in flat_binder_object.flags
- */
 enum flat_binder_object_flags {
-	/**
-	 * @FLAT_BINDER_FLAG_PRIORITY_MASK: bit-mask for min scheduler priority
-	 *
-	 * These bits can be used to set the minimum scheduler priority
-	 * at which transactions into this node should run. Valid values
-	 * in these bits depend on the scheduler policy encoded in
-	 * @FLAT_BINDER_FLAG_SCHED_POLICY_MASK.
-	 *
-	 * For SCHED_NORMAL/SCHED_BATCH, the valid range is between [-20..19]
-	 * For SCHED_FIFO/SCHED_RR, the value can run between [1..99]
-	 */
 	FLAT_BINDER_FLAG_PRIORITY_MASK = 0xff,
 	/**
 	 * @FLAT_BINDER_FLAG_ACCEPTS_FDS: whether the node accepts fds.

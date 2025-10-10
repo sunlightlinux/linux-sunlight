@@ -97,6 +97,10 @@ struct selinux_state {
 #endif
 	bool initialized;
 	bool policycap[__POLICYDB_CAP_MAX];
+#ifdef CONFIG_ANDROID
+	bool android_netlink_route;
+	bool android_netlink_getneigh;
+#endif
 
 	struct page *status_page;
 	struct mutex status_lock;
@@ -203,6 +207,7 @@ static inline bool selinux_policycap_netlink_xperm(void)
 		selinux_state.policycap[POLICYDB_CAP_NETLINK_XPERM]);
 }
 
+#ifdef CONFIG_ANDROID
 static inline bool selinux_android_nlroute_getlink(void)
 {
 	return READ_ONCE(selinux_state.android_netlink_route);
@@ -212,6 +217,17 @@ static inline bool selinux_android_nlroute_getneigh(void)
 {
 	return READ_ONCE(selinux_state.android_netlink_getneigh);
 }
+#else
+static inline bool selinux_android_nlroute_getlink(void)
+{
+	return false;
+}
+
+static inline bool selinux_android_nlroute_getneigh(void)
+{
+	return false;
+}
+#endif
 
 static inline bool selinux_policycap_functionfs_seclabel(void)
 {
