@@ -774,6 +774,7 @@ config HID_MONTEREY
 
 config HID_MULTITOUCH
 	tristate "HID Multitouch panels"
+	depends on HID_HAPTIC=y || HID_HAPTIC=m || HID_HAPTIC=n
 	help
 	  Generic support for HID multitouch panels.
 
