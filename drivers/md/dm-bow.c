@@ -1333,6 +1333,7 @@ static void dm_bow_exit(void)
 	dm_unregister_target(&bow_target);
 }
 
+MODULE_DESCRIPTION("Device-mapper target for backing up overwrites (BOW)");
 MODULE_LICENSE("GPL");
 
 module_init(dm_bow_init);
