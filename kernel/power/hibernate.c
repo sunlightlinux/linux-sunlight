@@ -708,6 +708,9 @@ static void power_down(void)
 						HIBERNATION_PLATFORM :
 						HIBERNATION_SHUTDOWN;
 		} else {
+			/* Match pm_restore_gfp_mask() call in hibernate() */
+			pm_restrict_gfp_mask();
+
 			/* Restore swap signature. */
 			error = swsusp_unmark();
 			if (error)
@@ -725,6 +728,8 @@ static void power_down(void)
 	case HIBERNATION_PLATFORM:
 		error = hibernation_platform_enter();
 		if (error == -EAGAIN || error == -EBUSY) {
+			/* Match pm_restore_gfp_mask() in hibernate(). */
+			pm_restrict_gfp_mask();
 			swsusp_unmark();
 			events_check_enabled = false;
 			pr_info("Wakeup event detected during hibernation, rolling back.\n");
