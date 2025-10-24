@@ -10850,15 +10850,52 @@ static int do_aquire_global_lock(struct drm_device *dev,
 		 * Make sure all pending HW programming completed and
 		 * page flips done
 		 */
-		ret = wait_for_completion_interruptible_timeout(&commit->hw_done, 10*HZ);
+		ret = wait_for_completion_interruptible_timeout(&commit->hw_done, 30*HZ);
 
 		if (ret > 0)
 			ret = wait_for_completion_interruptible_timeout(
-					&commit->flip_done, 10*HZ);
+					&commit->flip_done, 30*HZ);
 
-		if (ret == 0)
+		if (ret == 0) {
+			struct amdgpu_crtc *acrtc = to_amdgpu_crtc(crtc);
+			unsigned long flags;
+
 			drm_err(dev, "[CRTC:%d:%s] hw_done or flip_done timed out\n",
 				  crtc->base.id, crtc->name);
+
+			/*
+			 * Clean up stale event and pflip_status to prevent
+			 * WARN_ON in prepare_flip_isr on subsequent commits.
+			 * If the flip timed out, the hardware did not signal
+			 * completion, so we need to manually clean up the state.
+			 *
+			 * Enhanced cleanup:
+			 * - Clear both acrtc->event and base.state->event
+			 * - Force completion of flip_done to unblock waiters
+			 * - Reset pflip_status to prevent state corruption
+			 */
+			spin_lock_irqsave(&dev->event_lock, flags);
+
+			/* Clean up pending event in acrtc */
+			if (acrtc->event) {
+				drm_crtc_send_vblank_event(crtc, acrtc->event);
+				acrtc->event = NULL;
+				drm_crtc_vblank_put(crtc);
+			}
+
+			/* Also clean up event in base state to prevent re-assignment */
+			if (acrtc->base.state && acrtc->base.state->event) {
+				drm_crtc_send_vblank_event(crtc, acrtc->base.state->event);
+				acrtc->base.state->event = NULL;
+			}
+
+			acrtc->pflip_status = AMDGPU_FLIP_NONE;
+			spin_unlock_irqrestore(&dev->event_lock, flags);
+
+			/* Force completion to prevent further hangs */
+			complete_all(&commit->flip_done);
+			complete_all(&commit->hw_done);
+		}
 
 		drm_crtc_commit_put(commit);
 	}
