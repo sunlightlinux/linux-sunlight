@@ -2339,10 +2339,137 @@ void pci_assign_unassigned_bridge_resources(struct pci_dev *bridge)
 }
 EXPORT_SYMBOL_GPL(pci_assign_unassigned_bridge_resources);
 
-int pci_reassign_bridge_resources(struct pci_dev *bridge, unsigned long type)
+/* Return: @true if assignment of a required resource failed. */
+static bool pci_required_resource_failed(struct list_head *fail_head,
+					 unsigned long type)
 {
+	struct pci_dev_resource *fail_res;
+
+	type &= PCI_RES_TYPE_MASK;
+
+	list_for_each_entry(fail_res, fail_head, list) {
+		int idx = pci_resource_num(fail_res->dev, fail_res->res);
+
+		if (type && (fail_res->flags & PCI_RES_TYPE_MASK) != type)
+			continue;
+
+		if (!pci_resource_is_optional(fail_res->dev, idx))
+			return true;
+	}
+	return false;
+}
+
+/**
+ * pbus_select_window_for_type - Select bridge window for a resource type
+ * @bus: PCI bus
+ * @type: Resource type (resource flags can be passed as is)
+ *
+ * Select the bridge window based on a resource @type.
+ *
+ * For memory resources, the selection is done as follows:
+ *
+ * Any non-prefetchable resource is put into the non-prefetchable window.
+ *
+ * If there is no prefetchable MMIO window, put all memory resources into the
+ * non-prefetchable window.
+ *
+ * If there's a 64-bit prefetchable MMIO window, put all 64-bit prefetchable
+ * resources into it and place 32-bit prefetchable memory into the
+ * non-prefetchable window.
+ *
+ * Otherwise, put all prefetchable resources into the prefetchable window.
+ *
+ * Return: the bridge window resource or NULL if no bridge window is found.
+ */
+static struct resource *pbus_select_window_for_type(struct pci_bus *bus,
+						    unsigned long type)
+{
+	int iores_type = type & IORESOURCE_TYPE_BITS;	/* w/o 64bit & pref */
+	struct resource *mmio, *mmio_pref, *win;
+
+	type &= PCI_RES_TYPE_MASK;			/* with 64bit & pref */
+
+	if ((iores_type != IORESOURCE_IO) && (iores_type != IORESOURCE_MEM))
+		return NULL;
+
+	if (pci_is_root_bus(bus)) {
+		win = find_bus_resource_of_type(bus, type, type);
+		if (win)
+			return win;
+
+		type &= ~IORESOURCE_MEM_64;
+		win = find_bus_resource_of_type(bus, type, type);
+		if (win)
+			return win;
+
+		type &= ~IORESOURCE_PREFETCH;
+		return find_bus_resource_of_type(bus, type, type);
+	}
+
+	switch (iores_type) {
+	case IORESOURCE_IO:
+		return pci_bus_resource_n(bus, PCI_BUS_BRIDGE_IO_WINDOW);
+
+	case IORESOURCE_MEM:
+		mmio = pci_bus_resource_n(bus, PCI_BUS_BRIDGE_MEM_WINDOW);
+		mmio_pref = pci_bus_resource_n(bus, PCI_BUS_BRIDGE_PREF_MEM_WINDOW);
+
+		if (!(type & IORESOURCE_PREFETCH) ||
+		    !(mmio_pref->flags & IORESOURCE_MEM))
+			return mmio;
+
+		if ((type & IORESOURCE_MEM_64) ||
+		    !(mmio_pref->flags & IORESOURCE_MEM_64))
+			return mmio_pref;
+
+		return mmio;
+	default:
+		return NULL;
+	}
+}
+
+/**
+ * pbus_select_window - Select bridge window for a resource
+ * @bus: PCI bus
+ * @res: Resource
+ *
+ * Select the bridge window for @res. If the resource is already assigned,
+ * return the current bridge window.
+ *
+ * For memory resources, the selection is done as follows:
+ *
+ * Any non-prefetchable resource is put into the non-prefetchable window.
+ *
+ * If there is no prefetchable MMIO window, put all memory resources into the
+ * non-prefetchable window.
+ *
+ * If there's a 64-bit prefetchable MMIO window, put all 64-bit prefetchable
+ * resources into it and place 32-bit prefetchable memory into the
+ * non-prefetchable window.
+ *
+ * Otherwise, put all prefetchable resources into the prefetchable window.
+ *
+ * Return: the bridge window resource or NULL if no bridge window is found.
+ */
+struct resource *pbus_select_window(struct pci_bus *bus,
+				    const struct resource *res)
+{
+	if (res->parent)
+		return res->parent;
+
+	return pbus_select_window_for_type(bus, res->flags);
+}
+
+/*
+ * Walk to the root bus, find the bridge window relevant for @res and
+ * release it when possible. If the bridge window contains assigned
+ * resources, it cannot be released.
+ */
+int pbus_reassign_bridge_resources(struct pci_bus *bus, struct resource *res)
+{
+	unsigned long type = res->flags;
 	struct pci_dev_resource *dev_res;
-	struct pci_dev *next;
+	struct pci_dev *bridge;
 	LIST_HEAD(saved);
 	LIST_HEAD(added);
 	LIST_HEAD(failed);
@@ -2351,39 +2478,25 @@ int pci_reassign_bridge_resources(struct pci_dev *bridge, unsigned long type)
 
 	down_read(&pci_bus_sem);
 
-	/* Walk to the root hub, releasing bridge BARs when possible */
-	next = bridge;
-	do {
-		bridge = next;
-		for (i = PCI_BRIDGE_RESOURCES; i < PCI_BRIDGE_RESOURCE_END;
-		     i++) {
-			struct resource *res = &bridge->resource[i];
-			const char *res_name = pci_resource_name(bridge, i);
+	while (!pci_is_root_bus(bus)) {
+		bridge = bus->self;
+		res = pbus_select_window(bus, res);
+		if (!res)
+			break;
 
-			if ((res->flags ^ type) & PCI_RES_TYPE_MASK)
-				continue;
+		i = pci_resource_num(bridge, res);
 
-			/* Ignore BARs which are still in use */
-			if (res->child)
-				continue;
-
+		/* Ignore BARs which are still in use */
+		if (!res->child) {
 			ret = add_to_list(&saved, bridge, res, 0, 0);
 			if (ret)
 				goto cleanup;
 
-			pci_info(bridge, "%s %pR: releasing\n", res_name, res);
-
-			if (res->parent)
-				release_resource(res);
-			res->start = 0;
-			res->end = 0;
-			break;
+			pci_release_resource(bridge, i);
 		}
-		if (i == PCI_BRIDGE_RESOURCE_END)
-			break;
 
-		next = bridge->bus ? bridge->bus->self : NULL;
-	} while (next);
+		bus = bus->parent;
+	}
 
 	if (list_empty(&saved)) {
 		up_read(&pci_bus_sem);
@@ -2396,8 +2509,12 @@ int pci_reassign_bridge_resources(struct pci_dev *bridge, unsigned long type)
 		free_list(&added);
 
 	if (!list_empty(&failed)) {
-		ret = -ENOSPC;
-		goto cleanup;
+		if (pci_required_resource_failed(&failed, type)) {
+			ret = -ENOSPC;
+			goto cleanup;
+		}
+		/* Only resources with unrelated types failed (again) */
+		free_list(&failed);
 	}
 
 	list_for_each_entry(dev_res, &saved, list) {
