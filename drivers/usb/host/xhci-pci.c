@@ -342,6 +342,20 @@ static void xhci_pci_quirks(struct device *dev, struct xhci_hcd *xhci)
 		pdev->device == PCI_DEVICE_ID_AMD_RENOIR_XHCI)
 		xhci->quirks |= XHCI_BROKEN_D3COLD_S2I;
 
+	/*
+	 * ASUS ROG Zephyrus G14 (subsystem 0x1043:0x201f) with AMD RENOIR
+	 * xHCI controllers (0x1022:0x1639) refuse to enter D3hot on suspend,
+	 * causing the system to wake up in a hybrid state where the OS resumes
+	 * but the embedded controller (keyboard backlight, LEDs) remains stuck
+	 * in sleep mode. Force a reset on resume to properly reinitialize all
+	 * USB devices and the embedded controller.
+	 */
+	if (pdev->vendor == PCI_VENDOR_ID_AMD &&
+	    pdev->device == PCI_DEVICE_ID_AMD_RENOIR_XHCI &&
+	    pdev->subsystem_vendor == PCI_VENDOR_ID_ASUSTEK &&
+	    pdev->subsystem_device == 0x201f)
+		xhci->quirks |= XHCI_RESET_ON_RESUME;
+
 	if (pdev->vendor == PCI_VENDOR_ID_INTEL) {
 		xhci->quirks |= XHCI_LPM_SUPPORT;
 		xhci->quirks |= XHCI_INTEL_HOST;
