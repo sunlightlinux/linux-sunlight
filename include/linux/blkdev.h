@@ -199,7 +199,7 @@ struct gendisk {
 	unsigned int		zone_wplugs_hash_bits;
 	atomic_t		nr_zone_wplugs;
 	spinlock_t		zone_wplugs_lock;
-	struct mempool_s	*zone_wplugs_pool;
+	struct mempool		*zone_wplugs_pool;
 	struct hlist_head	*zone_wplugs_hash;
 	struct workqueue_struct *zone_wplugs_wq;
 #endif /* CONFIG_BLK_DEV_ZONED */
@@ -1871,13 +1871,6 @@ static inline int bio_split_rw_at(struct bio *bio,
 		unsigned *segs, unsigned max_bytes)
 {
 	return bio_split_io_at(bio, lim, segs, max_bytes, lim->dma_alignment);
-}
-
-static inline int bio_iov_iter_get_bdev_pages(struct bio *bio,
-		struct iov_iter *iter, struct block_device *bdev)
-{
-	return bio_iov_iter_get_pages_aligned(bio, iter,
-					bdev_logical_block_size(bdev) - 1);
 }
 
 #define DEFINE_IO_COMP_BATCH(name)	struct io_comp_batch name = { }

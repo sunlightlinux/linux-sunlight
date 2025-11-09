@@ -29,7 +29,7 @@
  *
  * Also see the examples in the liburing library:
  *
- *	git://git.kernel.dk/liburing
+ *	git://git.kernel.org/pub/scm/linux/kernel/git/axboe/liburing.git
  *
  * io_uring also uses READ/WRITE_ONCE() for _any_ store or load that happens
  * from data shared between the kernel and application. This is done both
@@ -879,7 +879,7 @@ static inline struct io_cqe io_init_cqe(u64 user_data, s32 res, u32 cflags)
 }
 
 static __cold void io_cqe_overflow(struct io_ring_ctx *ctx, struct io_cqe *cqe,
-			           struct io_big_cqe *big_cqe)
+				   struct io_big_cqe *big_cqe)
 {
 	struct io_overflow_cqe *ocqe;
 
