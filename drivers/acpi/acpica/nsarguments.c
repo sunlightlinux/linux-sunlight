@@ -58,6 +58,23 @@ void acpi_ns_check_argument_types(struct acpi_evaluate_info *info)
 		/* No typechecking for ACPI_TYPE_ANY */
 
 		if ((user_arg_type != arg_type) && (arg_type != ACPI_TYPE_ANY)) {
+			/*
+			 * Workaround for common BIOS bug: Many BIOSes incorrectly
+			 * pass a Buffer instead of Package as argument #4 to _DSM.
+			 * Allow this for compatibility with buggy firmware.
+			 */
+			if (info->predefined &&
+			    info->predefined->info.name[0] == '_' &&
+			    info->predefined->info.name[1] == 'D' &&
+			    info->predefined->info.name[2] == 'S' &&
+			    info->predefined->info.name[3] == 'M' &&
+			    i == 3 &&
+			    user_arg_type == ACPI_TYPE_BUFFER &&
+			    arg_type == ACPI_TYPE_PACKAGE) {
+				/* Silently accept Buffer for Package in _DSM arg #4 */
+				continue;
+			}
+
 			ACPI_WARN_PREDEFINED((AE_INFO, info->full_pathname,
 					      ACPI_WARN_ALWAYS,
 					      "Argument #%u type mismatch - "
