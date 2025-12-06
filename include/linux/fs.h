@@ -367,23 +367,9 @@ struct readahead_control;
 #define IOCB_NOIO		(1 << 20)
 /* can use bio alloc cache */
 #define IOCB_ALLOC_CACHE	(1 << 21)
-/*
- * IOCB_DIO_CALLER_COMP can be set by the iocb owner, to indicate that the
- * iocb completion can be passed back to the owner for execution from a safe
- * context rather than needing to be punted through a workqueue. If this
- * flag is set, the bio completion handling may set iocb->dio_complete to a
- * handler function and iocb->private to context information for that handler.
- * The issuer should call the handler with that context information from task
- * context to complete the processing of the iocb. Note that while this
- * provides a task context for the dio_complete() callback, it should only be
- * used on the completion side for non-IO generating completions. It's fine to
- * call blocking functions from this callback, but they should not wait for
- * unrelated IO (like cache flushing, new IO generation, etc).
- */
-#define IOCB_DIO_CALLER_COMP	(1 << 22)
 /* kiocb is a read or write operation submitted by fs/aio.c. */
-#define IOCB_AIO_RW		(1 << 23)
-#define IOCB_HAS_METADATA	(1 << 24)
+#define IOCB_AIO_RW		(1 << 22)
+#define IOCB_HAS_METADATA	(1 << 23)
 
 /* for use in trace events */
 #define TRACE_IOCB_STRINGS \
@@ -400,7 +386,6 @@ struct readahead_control;
 	{ IOCB_WAITQ,		"WAITQ" }, \
 	{ IOCB_NOIO,		"NOIO" }, \
 	{ IOCB_ALLOC_CACHE,	"ALLOC_CACHE" }, \
-	{ IOCB_DIO_CALLER_COMP,	"CALLER_COMP" }, \
 	{ IOCB_AIO_RW,		"AIO_RW" }, \
 	{ IOCB_HAS_METADATA,	"AIO_HAS_METADATA" }
 
@@ -412,23 +397,13 @@ struct kiocb {
 	int			ki_flags;
 	u16			ki_ioprio; /* See linux/ioprio.h */
 	u8			ki_write_stream;
-	union {
-		/*
-		 * Only used for async buffered reads, where it denotes the
-		 * page waitqueue associated with completing the read. Valid
-		 * IFF IOCB_WAITQ is set.
-		 */
-		struct wait_page_queue	*ki_waitq;
-		/*
-		 * Can be used for O_DIRECT IO, where the completion handling
-		 * is punted back to the issuer of the IO. May only be set
-		 * if IOCB_DIO_CALLER_COMP is set by the issuer, and the issuer
-		 * must then check for presence of this handler when ki_complete
-		 * is invoked. The data passed in to this handler must be
-		 * assigned to ->private when dio_complete is assigned.
-		 */
-		ssize_t (*dio_complete)(void *data);
-	};
+
+	/*
+	 * Only used for async buffered reads, where it denotes the page
+	 * waitqueue associated with completing the read.
+	 * Valid IFF IOCB_WAITQ is set.
+	 */
+	struct wait_page_queue	*ki_waitq;
 };
 
 static inline bool is_sync_kiocb(struct kiocb *kiocb)
@@ -659,13 +634,14 @@ is_uncached_acl(struct posix_acl *acl)
 	return (long)acl & 1;
 }
 
-#define IOP_FASTPERM	0x0001
-#define IOP_LOOKUP	0x0002
-#define IOP_NOFOLLOW	0x0004
-#define IOP_XATTR	0x0008
+#define IOP_FASTPERM		0x0001
+#define IOP_LOOKUP		0x0002
+#define IOP_NOFOLLOW		0x0004
+#define IOP_XATTR		0x0008
 #define IOP_DEFAULT_READLINK	0x0010
-#define IOP_MGTIME	0x0020
-#define IOP_CACHED_LINK	0x0040
+#define IOP_MGTIME		0x0020
+#define IOP_CACHED_LINK		0x0040
+#define IOP_FASTPERM_MAY_EXEC	0x0080
 
 /*
  * Inode state bits.  Protected by inode->i_lock
@@ -759,7 +735,7 @@ enum inode_state_bits {
 	/* reserved wait address bit 3 */
 };
 
-enum inode_state_flags_t {
+enum inode_state_flags_enum {
 	I_NEW			= (1U << __I_NEW),
 	I_SYNC			= (1U << __I_SYNC),
 	I_LRU_ISOLATING         = (1U << __I_LRU_ISOLATING),
@@ -784,6 +760,13 @@ enum inode_state_flags_t {
 #define I_DIRTY_INODE (I_DIRTY_SYNC | I_DIRTY_DATASYNC)
 #define I_DIRTY (I_DIRTY_INODE | I_DIRTY_PAGES)
 #define I_DIRTY_ALL (I_DIRTY | I_DIRTY_TIME)
+
+/*
+ * Use inode_state_read() & friends to access.
+ */
+struct inode_state_flags {
+	enum inode_state_flags_enum __state;
+};
 
 /*
  * Keep mostly read-only and often accessed (especially for
@@ -843,7 +826,7 @@ struct inode {
 #endif
 
 	/* Misc */
-	enum inode_state_flags_t	i_state;
+	struct inode_state_flags i_state;
 	/* 32-bit hole */
 	struct rw_semaphore	i_rwsem;
 
@@ -902,6 +885,80 @@ struct inode {
 	void			*i_private; /* fs or device private pointer */
 } __randomize_layout;
 
+/*
+ * i_state handling
+ *
+ * We hide all of it behind helpers so that we can validate consumers.
+ */
+static inline enum inode_state_flags_enum inode_state_read_once(struct inode *inode)
+{
+	return READ_ONCE(inode->i_state.__state);
+}
+
+static inline enum inode_state_flags_enum inode_state_read(struct inode *inode)
+{
+	lockdep_assert_held(&inode->i_lock);
+	return inode->i_state.__state;
+}
+
+static inline void inode_state_set_raw(struct inode *inode,
+				       enum inode_state_flags_enum flags)
+{
+	WRITE_ONCE(inode->i_state.__state, inode->i_state.__state | flags);
+}
+
+static inline void inode_state_set(struct inode *inode,
+				   enum inode_state_flags_enum flags)
+{
+	lockdep_assert_held(&inode->i_lock);
+	inode_state_set_raw(inode, flags);
+}
+
+static inline void inode_state_clear_raw(struct inode *inode,
+					 enum inode_state_flags_enum flags)
+{
+	WRITE_ONCE(inode->i_state.__state, inode->i_state.__state & ~flags);
+}
+
+static inline void inode_state_clear(struct inode *inode,
+				     enum inode_state_flags_enum flags)
+{
+	lockdep_assert_held(&inode->i_lock);
+	inode_state_clear_raw(inode, flags);
+}
+
+static inline void inode_state_assign_raw(struct inode *inode,
+					  enum inode_state_flags_enum flags)
+{
+	WRITE_ONCE(inode->i_state.__state, flags);
+}
+
+static inline void inode_state_assign(struct inode *inode,
+				      enum inode_state_flags_enum flags)
+{
+	lockdep_assert_held(&inode->i_lock);
+	inode_state_assign_raw(inode, flags);
+}
+
+static inline void inode_state_replace_raw(struct inode *inode,
+					   enum inode_state_flags_enum clearflags,
+					   enum inode_state_flags_enum setflags)
+{
+	enum inode_state_flags_enum flags;
+	flags = inode->i_state.__state;
+	flags &= ~clearflags;
+	flags |= setflags;
+	inode_state_assign_raw(inode, flags);
+}
+
+static inline void inode_state_replace(struct inode *inode,
+				       enum inode_state_flags_enum clearflags,
+				       enum inode_state_flags_enum setflags)
+{
+	lockdep_assert_held(&inode->i_lock);
+	inode_state_replace_raw(inode, clearflags, setflags);
+}
+
 static inline void inode_set_cached_link(struct inode *inode, char *link, int linklen)
 {
 	VFS_WARN_ON_INODE(strlen(link) != linklen, inode);
@@ -948,6 +1005,8 @@ static inline void inode_fake_hash(struct inode *inode)
 {
 	hlist_add_fake(&inode->i_hash);
 }
+
+void wait_on_new_inode(struct inode *inode);
 
 /*
  * inode->i_rwsem nesting subclasses for the lock validator:
@@ -2635,8 +2694,8 @@ static inline int icount_read(const struct inode *inode)
  */
 static inline bool inode_is_dirtytime_only(struct inode *inode)
 {
-	return (inode->i_state & (I_DIRTY_TIME | I_NEW |
-				  I_FREEING | I_WILL_FREE)) == I_DIRTY_TIME;
+	return (inode_state_read_once(inode) &
+	       (I_DIRTY_TIME | I_NEW | I_FREEING | I_WILL_FREE)) == I_DIRTY_TIME;
 }
 
 extern void inc_nlink(struct inode *inode);
@@ -3103,7 +3162,7 @@ static inline bool inode_wrong_type(const struct inode *inode, umode_t mode)
  * file_start_write - get write access to a superblock for regular file io
  * @file: the file we want to write to
  *
- * This is a variant of sb_start_write() which is a noop on non-regualr file.
+ * This is a variant of sb_start_write() which is a noop on non-regular file.
  * Should be matched with a call to file_end_write().
  */
 static inline void file_start_write(struct file *file)
@@ -3328,7 +3387,7 @@ extern void d_mark_dontcache(struct inode *inode);
 
 extern struct inode *ilookup5_nowait(struct super_block *sb,
 		unsigned long hashval, int (*test)(struct inode *, void *),
-		void *data);
+		void *data, bool *isnew);
 extern struct inode *ilookup5(struct super_block *sb, unsigned long hashval,
 		int (*test)(struct inode *, void *), void *data);
 extern struct inode *ilookup(struct super_block *sb, unsigned long ino);
@@ -3380,11 +3439,9 @@ static inline bool is_zero_ino(ino_t ino)
 	return (u32)ino == 0;
 }
 
-/*
- * inode->i_lock must be held
- */
 static inline void __iget(struct inode *inode)
 {
+	lockdep_assert_held(&inode->i_lock);
 	atomic_inc(&inode->i_count);
 }
 
@@ -3423,7 +3480,7 @@ static inline void remove_inode_hash(struct inode *inode)
 }
 
 extern void inode_sb_list_add(struct inode *inode);
-extern void inode_add_lru(struct inode *inode);
+extern void inode_lru_list_add(struct inode *inode);
 
 int sb_set_blocksize(struct super_block *sb, int size);
 int __must_check sb_min_blocksize(struct super_block *sb, int size);
