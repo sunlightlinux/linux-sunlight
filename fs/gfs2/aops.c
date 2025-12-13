@@ -81,8 +81,7 @@ static int gfs2_write_jdata_folio(struct folio *folio,
 	 * the page size, the remaining memory is zeroed when mapped, and
 	 * writes to that region are not written out to the file."
 	 */
-	if (folio_pos(folio) < i_size &&
-	    i_size < folio_pos(folio) + folio_size(folio))
+	if (folio_pos(folio) < i_size && i_size < folio_next_pos(folio))
 		folio_zero_segment(folio, offset_in_folio(folio, i_size),
 				folio_size(folio));
 
@@ -311,10 +310,7 @@ static int gfs2_write_cache_jdata(struct address_space *mapping,
 			range_whole = 1;
 		cycled = 1; /* ignore range_cyclic tests */
 	}
-	if (wbc->sync_mode == WB_SYNC_ALL || wbc->tagged_writepages)
-		tag = PAGECACHE_TAG_TOWRITE;
-	else
-		tag = PAGECACHE_TAG_DIRTY;
+	tag = wbc_to_tag(wbc);
 
 retry:
 	if (wbc->sync_mode == WB_SYNC_ALL || wbc->tagged_writepages)
