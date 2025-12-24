@@ -191,7 +191,7 @@ out:
 static int chmod(struct dentry *dentry, umode_t mode)
 {
 	struct inode *inode = dentry->d_inode;
-	struct inode *delegated_inode = NULL;
+	struct delegated_inode delegated_inode = { };
 	struct iattr newattrs;
 	int error;
 
@@ -201,7 +201,7 @@ retry_deleg:
 	newattrs.ia_valid = ATTR_MODE | ATTR_CTIME;
 	error = notify_change(&nop_mnt_idmap, dentry, &newattrs, &delegated_inode);
 	inode_unlock(inode);
-	if (delegated_inode) {
+	if (is_delegated(&delegated_inode)) {
 		error = break_deleg_wait(&delegated_inode);
 		if (!error)
 			goto retry_deleg;
@@ -591,8 +591,8 @@ static long ioctl_create_file(struct file *file,
 	/* Creating a file in the .index dir. */
 	index_dir_inode = d_inode(mi->mi_index_dir);
 	inode_lock_nested(index_dir_inode, I_MUTEX_PARENT);
-	error = vfs_create(&nop_mnt_idmap, index_dir_inode, index_file_dentry,
-			   args.mode | 0222, true);
+	error = vfs_create(&nop_mnt_idmap, index_file_dentry,
+			   args.mode | 0222, NULL);
 	inode_unlock(index_dir_inode);
 
 	if (error)
@@ -864,8 +864,8 @@ static long ioctl_create_mapped_file(struct file *file, void __user *arg)
 
 	parent_inode = d_inode(parent_dir_path.dentry);
 	inode_lock_nested(parent_inode, I_MUTEX_PARENT);
-	error = vfs_create(&nop_mnt_idmap, parent_inode, file_dentry,
-			   args.mode | 0222, true);
+	error = vfs_create(&nop_mnt_idmap, file_dentry,
+			   args.mode | 0222, NULL);
 	inode_unlock(parent_inode);
 	if (error)
 		goto out;

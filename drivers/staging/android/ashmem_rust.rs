@@ -135,6 +135,7 @@ struct Ashmem {
     inner: Mutex<AshmemInner>,
 }
 
+#[pin_data]
 struct AshmemInner {
     size: usize,
     prot_mask: usize,

@@ -452,6 +452,7 @@ int hda_codec_i915_exit(struct snd_sof_dev *sdev)
 EXPORT_SYMBOL_NS_GPL(hda_codec_i915_exit, "SND_SOC_SOF_HDA_AUDIO_CODEC_I915");
 
 MODULE_SOFTDEP("pre: snd_hda_codec_alc269");
+MODULE_SOFTDEP("pre: snd-hda-codec-intelhdmi");
 MODULE_SOFTDEP("pre: snd-hda-codec-hdmi");
 #endif
 

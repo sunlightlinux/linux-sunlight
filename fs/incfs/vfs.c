@@ -465,7 +465,8 @@ static struct dentry *open_or_create_special_dir(struct dentry *backing_dir,
 
 	/* Index needs to be created. */
 	inode_lock_nested(backing_inode, I_MUTEX_PARENT);
-	index_dentry = vfs_mkdir(&nop_mnt_idmap, backing_inode, index_dentry, 0777);
+	index_dentry = vfs_mkdir(&nop_mnt_idmap, backing_inode, index_dentry,
+				 0777, NULL);
 	inode_unlock(backing_inode);
 
 	if (IS_ERR(index_dentry)) {
@@ -646,7 +647,7 @@ static int incfs_rmdir(struct dentry *dentry)
 	int error = 0;
 
 	inode_lock_nested(pinode, I_MUTEX_PARENT);
-	error = vfs_rmdir(&nop_mnt_idmap, pinode, dentry);
+	error = vfs_rmdir(&nop_mnt_idmap, pinode, dentry, NULL);
 	inode_unlock(pinode);
 
 	dput(parent_dentry);
@@ -1097,7 +1098,8 @@ static struct dentry *dir_mkdir(struct mnt_idmap *idmap, struct inode *dir, stru
 		goto out;
 	}
 	inode_lock_nested(dir_node->n_backing_inode, I_MUTEX_PARENT);
-	backing_dentry = vfs_mkdir(idmap, dir_node->n_backing_inode, backing_dentry, mode | 0222);
+	backing_dentry = vfs_mkdir(idmap, dir_node->n_backing_inode,
+				   backing_dentry, mode | 0222, NULL);
 	inode_unlock(dir_node->n_backing_inode);
 	if (!IS_ERR(backing_dentry)) {
 		struct inode *inode = NULL;
@@ -1973,11 +1975,11 @@ void incfs_kill_sb(struct super_block *sb)
 		if (dinode) {
 			if (mi->mi_index_dir && mi->mi_index_free)
 				vfs_rmdir(&nop_mnt_idmap, dinode,
-					  mi->mi_index_dir);
+					  mi->mi_index_dir, NULL);
 
 			if (mi->mi_incomplete_dir && mi->mi_incomplete_free)
 				vfs_rmdir(&nop_mnt_idmap, dinode,
-					  mi->mi_incomplete_dir);
+					  mi->mi_incomplete_dir, NULL);
 		}
 
 		incfs_free_mount_info(mi);
