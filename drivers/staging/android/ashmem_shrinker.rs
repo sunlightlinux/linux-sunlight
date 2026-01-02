@@ -11,7 +11,7 @@ use kernel::{
     alloc::AllocError,
     bindings, c_str,
     ffi::{c_int, c_long, c_ulong, c_void},
-    str::CStr,
+    str::{CStr, CStrExt as _},
     types::ForeignOwnable,
 };
 

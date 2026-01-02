@@ -250,9 +250,8 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
 #ifdef CONFIG_SECCOMP_FILTER
 	.seccomp	= { .filter_count = ATOMIC_INIT(0) },
 #endif
-#ifdef CONFIG_ANDROID_VENDOR_OEM_DATA
-	.android_vendor_data1 = {0, },
-	.android_oem_data1 = {0, },
+#ifdef CONFIG_SCHED_MM_CID
+	.mm_cid		= { .cid = MM_CID_UNSET, },
 #endif
 };
 EXPORT_SYMBOL(init_task);

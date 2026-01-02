@@ -306,7 +306,7 @@ impl MiscDevice for Ashmem {
 impl Ashmem {
     fn set_name(&self, reader: UserSliceReader) -> Result<isize> {
         let mut buf = [0u8; ASHMEM_NAME_LEN];
-        let name = reader.strcpy_into_buf(&mut buf)?.as_bytes();
+        let name = reader.strcpy_into_buf(&mut buf)?.to_bytes();
 
         let mut v = KVec::with_capacity(name.len(), GFP_KERNEL)?;
         v.extend_from_slice(name, GFP_KERNEL)?;

@@ -257,7 +257,7 @@ repeat:
 	rcu_read_unlock();
 
 	pidfs_exit(p);
-	cgroup_release(p);
+	cgroup_task_release(p);
 
 	/* Retrieve @thread_pid before __unhash_process() may set it to NULL. */
 	thread_pid = task_pid(p);
@@ -912,6 +912,7 @@ void __noreturn do_exit(long code)
 	user_events_exit(tsk);
 
 	io_uring_files_cancel();
+	sched_mm_cid_exit(tsk);
 	exit_signals(tsk);  /* sets PF_EXITING */
 
 	seccomp_filter_release(tsk);
@@ -941,7 +942,6 @@ void __noreturn do_exit(long code)
 
 	tsk->exit_code = code;
 	taskstats_exit(tsk, group_dead);
-	unwind_deferred_task_exit(tsk);
 	trace_sched_process_exit(tsk, group_dead);
 
 	/*
@@ -952,6 +952,12 @@ void __noreturn do_exit(long code)
 	 * gets woken up by child-exit notifications.
 	 */
 	perf_event_exit_task(tsk);
+	/*
+	 * PF_EXITING (above) ensures unwind_deferred_request() will no
+	 * longer add new unwinds. While exit_mm() (below) will destroy the
+	 * abaility to do unwinds. So flush any pending unwinds here.
+	 */
+	unwind_deferred_task_exit(tsk);
 
 	exit_mm();
 
@@ -969,7 +975,7 @@ void __noreturn do_exit(long code)
 	exit_thread(tsk);
 
 	sched_autogroup_exit_task(tsk);
-	cgroup_exit(tsk);
+	cgroup_task_exit(tsk);
 
 	/*
 	 * FIXME: do that only when needed, using sched_exit tracepoint

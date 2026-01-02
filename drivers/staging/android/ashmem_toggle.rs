@@ -63,7 +63,7 @@ impl<T: AshmemToggle> MiscDevice for AshmemToggleMisc<T> {
         let mut data = [0; 16];
         let len = iov.copy_from_iter(&mut data[..15]);
         data[len] = 0;
-        let data = CStr::from_bytes_with_nul(&data[..len + 1])?;
+        let data = CStr::from_bytes_with_nul(&data[..len + 1]).map_err(|_| EINVAL)?;
         T::set(kstrtobool(data)?)?;
         Ok(len)
     }
