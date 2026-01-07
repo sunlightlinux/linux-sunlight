@@ -8008,6 +8008,14 @@ EXPORT_SYMBOL(__cond_resched_rwlock_write);
  *   preempt_schedule_notrace   <- preempt_schedule_notrace
  *   irqentry_exit_cond_resched <- irqentry_exit_cond_resched
  *   dynamic_preempt_lazy       <- true
+ *
+ * RT:
+ *   cond_resched               <- RET0
+ *   might_resched              <- RET0
+ *   preempt_schedule           <- preempt_schedule
+ *   preempt_schedule_notrace   <- preempt_schedule_notrace
+ *   irqentry_exit_cond_resched <- NOP
+ *   dynamic_preempt_lazy       <- false
  */
 
 enum {
@@ -8016,6 +8024,7 @@ enum {
 	preempt_dynamic_voluntary,
 	preempt_dynamic_full,
 	preempt_dynamic_lazy,
+	preempt_dynamic_rt,
 };
 
 int preempt_dynamic_mode = preempt_dynamic_undefined;
@@ -8036,6 +8045,11 @@ int sched_dynamic_mode(const char *str)
 # ifdef CONFIG_ARCH_HAS_PREEMPT_LAZY
 	if (!strcmp(str, "lazy"))
 		return preempt_dynamic_lazy;
+# endif
+
+# ifdef CONFIG_PREEMPT_RT
+	if (!strcmp(str, "rt"))
+		return preempt_dynamic_rt;
 # endif
 
 	return -EINVAL;
@@ -8113,6 +8127,17 @@ static void __sched_dynamic_update(int mode)
 		if (mode != preempt_dynamic_mode)
 			pr_info("Dynamic Preempt: lazy\n");
 		break;
+
+	case preempt_dynamic_rt:
+		preempt_dynamic_disable(cond_resched);
+		preempt_dynamic_disable(might_resched);
+		preempt_dynamic_enable(preempt_schedule);
+		preempt_dynamic_enable(preempt_schedule_notrace);
+		preempt_dynamic_disable(irqentry_exit_cond_resched);
+		preempt_dynamic_key_disable(preempt_lazy);
+		if (mode != preempt_dynamic_mode)
+			pr_info("Dynamic Preempt: rt\n");
+		break;
 	}
 
 	WRITE_ONCE(preempt_dynamic_mode, mode);
@@ -8141,7 +8166,9 @@ __setup("preempt=", setup_preempt_mode);
 static void __init preempt_dynamic_init(void)
 {
 	if (preempt_dynamic_mode == preempt_dynamic_undefined) {
-		if (IS_ENABLED(CONFIG_PREEMPT_NONE)) {
+		if (IS_ENABLED(CONFIG_PREEMPT_RT)) {
+			sched_dynamic_update(preempt_dynamic_rt);
+		} else if (IS_ENABLED(CONFIG_PREEMPT_NONE)) {
 			sched_dynamic_update(preempt_dynamic_none);
 		} else if (IS_ENABLED(CONFIG_PREEMPT_VOLUNTARY)) {
 			sched_dynamic_update(preempt_dynamic_voluntary);
@@ -8169,6 +8196,7 @@ PREEMPT_MODEL_ACCESSOR(none);
 PREEMPT_MODEL_ACCESSOR(voluntary);
 PREEMPT_MODEL_ACCESSOR(full);
 PREEMPT_MODEL_ACCESSOR(lazy);
+PREEMPT_MODEL_ACCESSOR(rt);
 
 #else /* !CONFIG_PREEMPT_DYNAMIC: */
 
@@ -8179,7 +8207,11 @@ static inline void preempt_dynamic_init(void) { }
 #endif /* CONFIG_PREEMPT_DYNAMIC */
 
 const char *preempt_modes[] = {
-	"none", "voluntary", "full", "lazy", NULL,
+	"none", "voluntary", "full", "lazy",
+#ifdef CONFIG_PREEMPT_RT
+	"rt",
+#endif
+	NULL,
 };
 
 const char *preempt_model_str(void)
