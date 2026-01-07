@@ -474,6 +474,7 @@ extern bool preempt_model_none(void);
 extern bool preempt_model_voluntary(void);
 extern bool preempt_model_full(void);
 extern bool preempt_model_lazy(void);
+extern bool preempt_model_rt(void);
 
 #else
 
@@ -495,12 +496,12 @@ static inline bool preempt_model_lazy(void)
 	return IS_ENABLED(CONFIG_PREEMPT_LAZY);
 }
 
-#endif
-
 static inline bool preempt_model_rt(void)
 {
 	return IS_ENABLED(CONFIG_PREEMPT_RT);
 }
+
+#endif
 
 extern const char *preempt_model_str(void);
 
