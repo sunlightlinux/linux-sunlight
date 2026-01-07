@@ -103,6 +103,10 @@ config PREEMPT_RT
 	  Select this if you are building a kernel for systems which
 	  require real-time guarantees.
 
+	  When combined with PREEMPT_DYNAMIC, this enables the 'rt' preemption
+	  mode to be selectable at boot time via the "preempt=rt" kernel
+	  command line parameter.
+
 config PREEMPT_RT_NEEDS_BH_LOCK
 	bool "Enforce softirq synchronisation on PREEMPT_RT"
 	depends on PREEMPT_RT
@@ -142,8 +146,24 @@ config PREEMPT_DYNAMIC
 	  but if runtime patching is not available for the specific architecture
 	  then the potential overhead should be considered.
 
+	  Available preemption modes depend on CONFIG_PREEMPT_RT:
+
+	  Without PREEMPT_RT:
+	    - none: No forced preemption (server workloads)
+	    - voluntary: Voluntary kernel preemption (desktop)
+	    - full: Fully preemptible kernel (low-latency desktop)
+	    - lazy: Scheduler-driven preemption (if ARCH_HAS_PREEMPT_LAZY)
+
+	  With PREEMPT_RT enabled:
+	    - full: Fully preemptible kernel (low-latency)
+	    - lazy: Scheduler-driven preemption (if ARCH_HAS_PREEMPT_LAZY)
+	    - rt: Real-time preemption with priority inheritance
+
+	  Note: 'none' and 'voluntary' modes are incompatible with PREEMPT_RT
+	  and will not be available when CONFIG_PREEMPT_RT is enabled.
+
 	  Interesting if you want the same pre-built kernel should be used for
-	  both Server and Desktop workloads.
+	  both Server, Desktop, and Real-Time workloads.
 
 config SCHED_CORE
 	bool "Core Scheduling for SMT"
