@@ -7,7 +7,6 @@
 use kernel::{
     bindings,
     error::{from_err_ptr, to_result, Result},
-    ffi::{c_int, c_ulong},
     fs::file::{File, LocalFile},
     iov::IovIterDest,
     miscdevice::loff_t,
@@ -212,7 +211,7 @@ unsafe fn get_shmem_fops(
         // immutable.
         let mut new_fops = unsafe { *shmem_fops };
         new_fops.mmap = Some(ashmem_vmfile_mmap);
-        new_fops.get_unmapped_area = Some(ashmem_vmfile_get_unmapped_area);
+        new_fops.get_unmapped_area = Some(bindings::mm_get_unmapped_area);
         // SAFETY: We hold the `SHMEM_FOPS_ONCE` guard, so there are no other writers. The value of
         // `SHMEM_FOPS_ONCE` is false, so there are no readers either.
         unsafe { *fops_ptr = new_fops };
@@ -230,17 +229,4 @@ extern "C" fn ashmem_vmfile_mmap(
     _vma: *mut bindings::vm_area_struct,
 ) -> c_int {
     EPERM.to_errno()
-}
-
-unsafe extern "C" fn ashmem_vmfile_get_unmapped_area(
-    file: *mut bindings::file,
-    addr: c_ulong,
-    len: c_ulong,
-    pgoff: c_ulong,
-    flags: c_ulong,
-) -> c_ulong {
-    // SAFETY: The `mm` of current does not change, so it is safe to access.
-    let mm = unsafe { (*bindings::get_current()).mm };
-    // SAFETY: This calls the right get_unmapped_area for a shmem.
-    unsafe { bindings::mm_get_unmapped_area(mm, file, addr, len, pgoff, flags) }
 }

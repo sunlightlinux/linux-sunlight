@@ -268,7 +268,7 @@ config GKI_HIDDEN_ETHERNET_CONFIGS
 
 config GKI_HIDDEN_IOMMU_CONFIGS
 	bool "Hidden IOMMU configuration needed for GKI"
-	select IOMMU_SVA
+	select IOMMU_SVA if (ARM64 || X86)
 	help
 	  Dummy config used to enable hidden IOMMU configs. These are
 	  normally selected implicitly when a module that relies on it is

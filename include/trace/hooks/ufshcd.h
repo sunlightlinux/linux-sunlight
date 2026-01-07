@@ -11,34 +11,32 @@
  * mechanism for vendor modules to hook and extend functionality
  */
 struct ufs_hba;
-struct request;
-struct ufshcd_lrb;
+struct scsi_cmnd;
 
 DECLARE_HOOK(android_vh_ufs_fill_prdt,
-	TP_PROTO(struct ufs_hba *hba, struct ufshcd_lrb *lrbp,
+	TP_PROTO(struct ufs_hba *hba, struct scsi_cmnd *cmd,
 		 unsigned int segments, int *err),
-	TP_ARGS(hba, lrbp, segments, err));
+	TP_ARGS(hba, cmd, segments, err));
 
 DECLARE_RESTRICTED_HOOK(android_rvh_ufs_reprogram_all_keys,
 			TP_PROTO(struct ufs_hba *hba, int *err),
 			TP_ARGS(hba, err), 1);
 
 DECLARE_HOOK(android_vh_ufs_prepare_command,
-	TP_PROTO(struct ufs_hba *hba, struct request *rq,
-		 struct ufshcd_lrb *lrbp, int *err),
-	TP_ARGS(hba, rq, lrbp, err));
+	TP_PROTO(struct ufs_hba *hba, struct scsi_cmnd *cmd, int *err),
+	TP_ARGS(hba, cmd, err));
 
 DECLARE_HOOK(android_vh_ufs_update_sysfs,
 	TP_PROTO(struct ufs_hba *hba),
 	TP_ARGS(hba));
 
 DECLARE_HOOK(android_vh_ufs_send_command,
-	TP_PROTO(struct ufs_hba *hba, struct ufshcd_lrb *lrbp),
-	TP_ARGS(hba, lrbp));
+	TP_PROTO(struct ufs_hba *hba, struct scsi_cmnd *cmd),
+	TP_ARGS(hba, cmd));
 
 DECLARE_HOOK(android_vh_ufs_compl_command,
-	TP_PROTO(struct ufs_hba *hba, struct ufshcd_lrb *lrbp),
-	TP_ARGS(hba, lrbp));
+	TP_PROTO(struct ufs_hba *hba, struct scsi_cmnd *cmd),
+	TP_ARGS(hba, cmd));
 
 struct uic_command;
 DECLARE_HOOK(android_vh_ufs_send_uic_command,
