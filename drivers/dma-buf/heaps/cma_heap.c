@@ -33,6 +33,7 @@
 static struct cma *dma_areas[MAX_CMA_AREAS] __initdata;
 static unsigned int dma_areas_num __initdata;
 
+#if IS_BUILTIN(CONFIG_DMABUF_HEAPS_CMA)
 int __init dma_heap_cma_register_heap(struct cma *cma)
 {
 	if (dma_areas_num >= ARRAY_SIZE(dma_areas))
@@ -42,6 +43,7 @@ int __init dma_heap_cma_register_heap(struct cma *cma)
 
 	return 0;
 }
+#endif
 
 struct cma_heap {
 	struct dma_heap *heap;

@@ -27,8 +27,9 @@
 #include <sys/timex.h>
 #include <string.h>
 #include <signal.h>
-#include <include/vdso/time64.h>
-#include "../kselftest.h"
+#include "kselftest.h"
+
+#define NSEC_PER_SEC 1000000000ULL
 
 /* CLOCK_HWSPECIFIC == CLOCK_SGI_CYCLE (Deprecated) */
 #define CLOCK_HWSPECIFIC		10
@@ -188,7 +189,7 @@ int main(int argc, char **argv)
 		fflush(stdout);
 
 		length = 10;
-		while (length <= (NSEC_PER_SEC * 10LL)) {
+		while (length <= (NSEC_PER_SEC * 10)) {
 			ret = nanosleep_test(clockid, length);
 			if (ret == UNSUPPORTED) {
 				ksft_test_result_skip("%-31s\n", clockstring(clockid));

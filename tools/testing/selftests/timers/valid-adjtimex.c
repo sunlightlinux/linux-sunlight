@@ -29,8 +29,10 @@
 #include <string.h>
 #include <signal.h>
 #include <unistd.h>
-#include <include/vdso/time64.h>
-#include "../kselftest.h"
+#include "kselftest.h"
+
+#define NSEC_PER_SEC 1000000000LL
+#define USEC_PER_SEC 1000000LL
 
 #define ADJ_SETOFFSET 0x0100
 
@@ -264,16 +266,16 @@ int validate_set_offset(void)
 	if (set_offset(-NSEC_PER_SEC - 1, 1))
 		return -1;
 
-	if (set_offset(5LL * NSEC_PER_SEC, 1))
+	if (set_offset(5 * NSEC_PER_SEC, 1))
 		return -1;
 
-	if (set_offset(-5LL * NSEC_PER_SEC, 1))
+	if (set_offset(-5 * NSEC_PER_SEC, 1))
 		return -1;
 
-	if (set_offset(5LL * NSEC_PER_SEC + NSEC_PER_SEC / 2, 1))
+	if (set_offset(5 * NSEC_PER_SEC + NSEC_PER_SEC / 2, 1))
 		return -1;
 
-	if (set_offset(-5LL * NSEC_PER_SEC - NSEC_PER_SEC / 2, 1))
+	if (set_offset(-5 * NSEC_PER_SEC - NSEC_PER_SEC / 2, 1))
 		return -1;
 
 	if (set_offset(USEC_PER_SEC - 1, 0))

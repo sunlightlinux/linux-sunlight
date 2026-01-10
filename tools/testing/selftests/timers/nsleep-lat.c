@@ -24,9 +24,9 @@
 #include <sys/timex.h>
 #include <string.h>
 #include <signal.h>
-#include <include/vdso/time64.h>
-#include "../kselftest.h"
-#include "helpers.h"
+#include "kselftest.h"
+
+#define NSEC_PER_SEC 1000000000ULL
 
 #define UNRESONABLE_LATENCY 40000000 /* 40ms in nanosecs */
 
@@ -74,6 +74,14 @@ struct timespec timespec_add(struct timespec ts, unsigned long long ns)
 	return ts;
 }
 
+
+long long timespec_sub(struct timespec a, struct timespec b)
+{
+	long long ret = NSEC_PER_SEC * b.tv_sec + b.tv_nsec;
+
+	ret -= NSEC_PER_SEC * a.tv_sec + a.tv_nsec;
+	return ret;
+}
 
 int nanosleep_lat_test(int clockid, long long ns)
 {
@@ -139,7 +147,7 @@ int main(int argc, char **argv)
 			continue;
 
 		length = 10;
-		while (length <= (NSEC_PER_SEC * 10LL)) {
+		while (length <= (NSEC_PER_SEC * 10)) {
 			ret = nanosleep_lat_test(clockid, length);
 			if (ret)
 				break;

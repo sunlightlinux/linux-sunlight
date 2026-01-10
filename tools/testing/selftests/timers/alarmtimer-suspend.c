@@ -28,12 +28,11 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <pthread.h>
-#include <include/vdso/time64.h>
 #include <errno.h>
-#include "../kselftest.h"
-#include "helpers.h"
+#include "kselftest.h"
 
-#define UNREASONABLE_LAT (NSEC_PER_SEC * 5LL) /* hopefully we resume in 5 secs */
+#define NSEC_PER_SEC 1000000000ULL
+#define UNREASONABLE_LAT (NSEC_PER_SEC * 5) /* hopefully we resume in 5 secs */
 
 #define SUSPEND_SECS 15
 int alarmcount;
@@ -71,6 +70,14 @@ char *clockstring(int clockid)
 }
 
 
+long long timespec_sub(struct timespec a, struct timespec b)
+{
+	long long ret = NSEC_PER_SEC * b.tv_sec + b.tv_nsec;
+
+	ret -= NSEC_PER_SEC * a.tv_sec + a.tv_nsec;
+	return ret;
+}
+
 int final_ret;
 
 void sigalarm(int signo)
@@ -81,8 +88,8 @@ void sigalarm(int signo)
 	clock_gettime(alarm_clock_id, &ts);
 	alarmcount++;
 
-	delta_ns = timespec_sub(ts, start_time);
-	delta_ns -= (long long)NSEC_PER_SEC * SUSPEND_SECS * alarmcount;
+	delta_ns = timespec_sub(start_time, ts);
+	delta_ns -= NSEC_PER_SEC * SUSPEND_SECS * alarmcount;
 
 	printf("ALARM(%i): %ld:%ld latency: %lld ns ", alarmcount, ts.tv_sec,
 							ts.tv_nsec, delta_ns);
