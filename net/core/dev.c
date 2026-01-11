@@ -4775,7 +4775,7 @@ int __dev_queue_xmit(struct sk_buff *skb, struct net_device *sb_dev)
 	struct net_device *dev = skb->dev;
 	struct netdev_queue *txq = NULL;
 	enum skb_drop_reason reason;
-	int cpu, rc = -ENOMEM;
+	int rc = -ENOMEM;
 	bool again = false;
 	struct Qdisc *q;
 
@@ -4856,22 +4856,25 @@ int __dev_queue_xmit(struct sk_buff *skb, struct net_device *sb_dev)
 		goto drop;
 	}
 
-	cpu = smp_processor_id(); /* ok because BHs are off */
+	/* Check for recursion. In PREEMPT_RT this uses a per-task counter,
+	 * which is safe against task migration unlike comparing the per-CPU
+	 * xmit_lock_owner.
+	 */
+	if (dev_xmit_recursion())
+		goto recursion_alert;
 
-	if (likely(!netif_tx_owned(txq, cpu))) {
-		bool is_list = false;
+	skb = validate_xmit_skb(skb, dev, &again);
+	if (!skb)
+		goto out;
 
-		if (dev_xmit_recursion())
-			goto recursion_alert;
-
-		skb = validate_xmit_skb(skb, dev, &again);
-		if (!skb)
-			goto out;
-
-		HARD_TX_LOCK(dev, txq, cpu);
-
+	/* Atomic trylock avoids the PREEMPT_RT race between reading the CPU
+	 * id and checking the lock owner. If trylock fails, another task
+	 * holds the lock - just drop the packet, this is not recursion
+	 * (already checked above).
+	 */
+	if (HARD_TX_TRYLOCK(dev, txq)) {
 		if (!netif_xmit_stopped(txq)) {
-			is_list = !!skb->next;
+			bool is_list = !!skb->next;
 
 			dev_xmit_recursion_inc();
 			skb = dev_hard_start_xmit(skb, dev, txq, &rc);
@@ -4889,21 +4892,19 @@ int __dev_queue_xmit(struct sk_buff *skb, struct net_device *sb_dev)
 
 		net_crit_ratelimited("Virtual device %s asks to queue packet!\n",
 				     dev->name);
-		/* NETDEV_TX_BUSY or queue was stopped */
-		if (!is_list)
-			rc = -ENETDOWN;
-	} else {
-		/* Recursion is detected! It is possible unfortunately. */
-recursion_alert:
-		net_crit_ratelimited("Dead loop on virtual device %s, fix it urgently!\n",
-				     dev->name);
-		rc = -ENETDOWN;
 	}
+	/* else: Lock held by another task. Drop packet silently. */
+	rc = -ENETDOWN;
+	reason = SKB_DROP_REASON_RECURSION_LIMIT;
+	goto drop;
 
+recursion_alert:
+	net_crit_ratelimited("Dead loop on virtual device %s, fix it urgently!\n",
+			     dev->name);
+	rc = -ENETDOWN;
 	reason = SKB_DROP_REASON_RECURSION_LIMIT;
 drop:
 	rcu_read_unlock_bh();
-
 	dev_core_stats_tx_dropped_inc(dev);
 	kfree_skb_list_reason(skb, reason);
 	return rc;
