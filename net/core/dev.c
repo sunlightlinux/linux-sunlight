@@ -4840,22 +4840,21 @@ int __dev_queue_xmit(struct sk_buff *skb, struct net_device *sb_dev)
 	 *Either shot noqueue qdisc, it is even simpler 8)
 	 */
 	if (dev->flags & IFF_UP) {
-		int cpu = smp_processor_id(); /* ok because BHs are off */
+		/* Check for recursion. In PREEMPT_RT this uses per-task counter */
+		if (dev_xmit_recursion())
+			goto recursion_alert;
 
-		if (!netif_tx_owned(txq, cpu)) {
-			bool is_list = false;
+		skb = validate_xmit_skb(skb, dev, &again);
+		if (!skb)
+			goto out;
 
-			if (dev_xmit_recursion())
-				goto recursion_alert;
-
-			skb = validate_xmit_skb(skb, dev, &again);
-			if (!skb)
-				goto out;
-
-			HARD_TX_LOCK(dev, txq, cpu);
-
+		/* Atomic trylock avoids PREEMPT_RT race between reading CPU id
+		 * and checking lock owner. If trylock fails, another task holds
+		 * the lock - just drop packet, not recursion (already checked).
+		 */
+		if (HARD_TX_TRYLOCK(dev, txq)) {
 			if (!netif_xmit_stopped(txq)) {
-				is_list = !!skb->next;
+				bool is_list = !!skb->next;
 
 				dev_xmit_recursion_inc();
 				skb = dev_hard_start_xmit(skb, dev, txq, &rc);
@@ -4874,22 +4873,19 @@ int __dev_queue_xmit(struct sk_buff *skb, struct net_device *sb_dev)
 
 			net_crit_ratelimited("Virtual device %s asks to queue packet!\n",
 					     dev->name);
-			/* NETDEV_TX_BUSY or queue was stopped */
-			if (!is_list)
-				rc = -ENETDOWN;
-		} else {
-			/* Recursion is detected! It is possible,
-			 * unfortunately
-			 */
-recursion_alert:
-			net_crit_ratelimited("Dead loop on virtual device %s, fix it urgently!\n",
-					     dev->name);
-			rc = -ENETDOWN;
 		}
+		/* else: Lock held by another task. Drop packet silently. */
 	}
+	rc = -ENETDOWN;
+	goto drop_packet;
 
+recursion_alert:
+	net_crit_ratelimited("Dead loop on virtual device %s, fix it urgently!\n",
+			     dev->name);
+	rc = -ENETDOWN;
+
+drop_packet:
 	rcu_read_unlock_bh();
-
 	dev_core_stats_tx_dropped_inc(dev);
 	kfree_skb_list(skb);
 	return rc;
