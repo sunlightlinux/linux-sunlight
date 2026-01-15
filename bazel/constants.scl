@@ -1,5 +1,5 @@
 BRANCH="android-mainline"
-CLANG_VERSION="r574158"
+CLANG_VERSION="r584948b"
 RUSTC_VERSION="1.91.1"
 AARCH64_NDK_TRIPLE="aarch64-linux-android31"
 X86_64_NDK_TRIPLE="x86_64-linux-android31"

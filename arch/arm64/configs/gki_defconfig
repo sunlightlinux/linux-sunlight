@@ -70,6 +70,7 @@ CONFIG_ARM64_PMEM=y
 CONFIG_ARM64_PSEUDO_NMI=y
 CONFIG_RANDOMIZE_BASE=y
 # CONFIG_RANDOMIZE_MODULE_REGION_FULL is not set
+CONFIG_UNWIND_PATCH_PAC_INTO_SCS=y
 CONFIG_CMDLINE="console=ttynull stack_depot_disable=on cgroup_disable=pressure kasan.stacktrace=off kvm-arm.mode=protected bootconfig ioremap_guard"
 # CONFIG_DMI is not set
 CONFIG_HIBERNATION=y
@@ -135,7 +136,7 @@ CONFIG_LRU_GEN=y
 CONFIG_LRU_GEN_ENABLED=y
 CONFIG_NET=y
 CONFIG_PACKET=y
-CONFIG_TLS=m
+# CONFIG_AF_UNIX_OOB is not set
 CONFIG_XFRM_USER=y
 CONFIG_XFRM_INTERFACE=y
 CONFIG_XFRM_MIGRATE=y
