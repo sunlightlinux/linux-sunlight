@@ -314,6 +314,7 @@ R:	Mauro Carvalho Chehab <mchehab@kernel.org>
 R:	Shuai Xue <xueshuai@linux.alibaba.com>
 L:	linux-acpi@vger.kernel.org
 F:	drivers/acpi/apei/
+F:	drivers/firmware/efi/cper*
 
 ACPI COMPONENT ARCHITECTURE (ACPICA)
 M:	"Rafael J. Wysocki" <rafael@kernel.org>
@@ -9516,6 +9517,7 @@ F:	arch/arm/boot/compressed/efi-header.S
 F:	arch/x86/platform/efi/
 F:	drivers/firmware/efi/
 F:	include/linux/efi*.h
+X:	drivers/firmware/efi/cper*
 
 EXTERNAL CONNECTOR SUBSYSTEM (EXTCON)
 M:	MyungJoo Ham <myungjoo.ham@samsung.com>
@@ -14887,6 +14889,7 @@ LSILOGIC MPT FUSION DRIVERS (FC/SAS/SPI)
 M:	Sathya Prakash <sathya.prakash@broadcom.com>
 M:	Sreekanth Reddy <sreekanth.reddy@broadcom.com>
 M:	Suganath Prabu Subramani <suganath-prabu.subramani@broadcom.com>
+M:	Ranjan Kumar <ranjan.kumar@broadcom.com>
 L:	MPT-FusionLinux.pdl@broadcom.com
 L:	linux-scsi@vger.kernel.org
 S:	Supported
@@ -18430,9 +18433,11 @@ M:	Jakub Kicinski <kuba@kernel.org>
 M:	Sabrina Dubroca <sd@queasysnail.net>
 L:	netdev@vger.kernel.org
 S:	Maintained
+F:	Documentation/networking/tls*
 F:	include/net/tls.h
 F:	include/uapi/linux/tls.h
-F:	net/tls/*
+F:	net/tls/
+F:	tools/testing/selftests/net/tls.c
 
 NETWORKING [SOCKETS]
 M:	Eric Dumazet <edumazet@google.com>
