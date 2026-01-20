@@ -8,3 +8,4 @@ obj-$(CONFIG_CPU_IDLE_GOV_MENU) += menu.o
 obj-$(CONFIG_CPU_IDLE_GOV_TEO) += teo.o
 obj-$(CONFIG_CPU_IDLE_GOV_HALTPOLL) += haltpoll.o
 obj-$(CONFIG_CPU_IDLE_GOV_MOBILE) += mobile.o
+obj-$(CONFIG_CPU_IDLE_GOV_ADAPTIVE) += adaptive.o
