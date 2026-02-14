@@ -1339,7 +1339,7 @@ static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
 
 #include "pelt.h"
 
-static int select_idle_sibling(struct task_struct *p, int prev_cpu, int cpu);
+static int select_idle_sibling(struct task_struct *p, int prev_cpu, int cpu, int sync);
 static unsigned long task_h_load(struct task_struct *p);
 static unsigned long capacity_of(int cpu);
 
@@ -7961,6 +7961,24 @@ static inline int __select_idle_cpu(int cpu, struct task_struct *p)
 DEFINE_STATIC_KEY_FALSE(sched_smt_present);
 EXPORT_SYMBOL_GPL(sched_smt_present);
 
+/*
+ * Return true if all the CPUs in the SMT core where @cpu belongs are idle,
+ * false otherwise.
+ */
+static bool is_idle_core(int cpu)
+{
+	int sibling;
+
+	if (!sched_smt_active())
+		return (available_idle_cpu(cpu) || sched_idle_rq(cpu_rq(cpu)));
+
+	for_each_cpu(sibling, cpu_smt_mask(cpu))
+		if (!available_idle_cpu(sibling) && !sched_idle_rq(cpu_rq(sibling)))
+			return false;
+
+	return true;
+}
+
 static inline void set_idle_cores(int cpu, int val)
 {
 	struct sched_domain_shared *sds;
@@ -8235,12 +8253,25 @@ static inline bool asym_fits_cpu(unsigned long util,
 /*
  * Try and locate an idle core/thread in the LLC cache domain.
  */
-static int select_idle_sibling(struct task_struct *p, int prev, int target)
+static int select_idle_sibling(struct task_struct *p, int prev, int target, int sync)
 {
 	bool has_idle_core = false;
 	struct sched_domain *sd;
 	unsigned long task_util, util_min, util_max;
 	int i, recent_used_cpu, prev_aff = -1;
+
+	/* Check a recently used CPU as a potential idle candidate: */
+	recent_used_cpu = p->recent_used_cpu;
+	p->recent_used_cpu = prev;
+	if (recent_used_cpu != prev &&
+	    recent_used_cpu != target &&
+	    cpus_share_cache(recent_used_cpu, target) &&
+	    is_idle_core(recent_used_cpu) &&
+	    cpumask_test_cpu(recent_used_cpu, p->cpus_ptr)) {
+		return recent_used_cpu;
+	} else {
+		recent_used_cpu = -1;
+	}
 
 	/*
 	 * On asymmetric system, update task utilization because we will check
@@ -8258,7 +8289,7 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
 	 */
 	lockdep_assert_irqs_disabled();
 
-	if (choose_idle_cpu(target, p) &&
+	if (sync && is_idle_core(target) &&
 	    asym_fits_cpu(task_util, util_min, util_max, target))
 		return target;
 
@@ -8290,24 +8321,6 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
 	    this_rq()->nr_running <= 1 &&
 	    asym_fits_cpu(task_util, util_min, util_max, prev)) {
 		return prev;
-	}
-
-	/* Check a recently used CPU as a potential idle candidate: */
-	recent_used_cpu = p->recent_used_cpu;
-	p->recent_used_cpu = prev;
-	if (recent_used_cpu != prev &&
-	    recent_used_cpu != target &&
-	    cpus_share_cache(recent_used_cpu, target) &&
-	    choose_idle_cpu(recent_used_cpu, p) &&
-	    cpumask_test_cpu(recent_used_cpu, p->cpus_ptr) &&
-	    asym_fits_cpu(task_util, util_min, util_max, recent_used_cpu)) {
-
-		if (!static_branch_unlikely(&sched_cluster_active) ||
-		    cpus_share_resources(recent_used_cpu, target))
-			return recent_used_cpu;
-
-	} else {
-		recent_used_cpu = -1;
 	}
 
 	/*
@@ -9058,8 +9071,15 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
 		return sched_balance_find_dst_cpu(sd, p, cpu, prev_cpu, sd_flag);
 
 	/* Fast path */
-	if (wake_flags & WF_TTWU)
-		return select_idle_sibling(p, prev_cpu, new_cpu);
+	if (wake_flags & WF_TTWU) {
+		/*
+		 * If the previous CPU is an idle core, retain the same for
+		 * cache locality. Otherwise, search for an idle sibling.
+		 */
+		if (is_idle_core(prev_cpu))
+			return prev_cpu;
+		return select_idle_sibling(p, prev_cpu, new_cpu, sync);
+	}
 
 	return new_cpu;
 }
@@ -10782,7 +10802,7 @@ static bool sched_use_asym_prio(struct sched_domain *sd, int cpu)
 	if (!sched_smt_active())
 		return true;
 
-	return sd->flags & SD_SHARE_CPUCAPACITY || is_core_idle(cpu);
+	return sd->flags & SD_SHARE_CPUCAPACITY || is_idle_core(cpu);
 }
 
 static inline bool sched_asym(struct sched_domain *sd, int dst_cpu, int src_cpu)
@@ -13421,6 +13441,7 @@ static int sched_balance_newidle(struct rq *this_rq, struct rq_flags *rf)
 	struct sched_domain *sd;
 	int pulled_task = 0;
 	int done = 0;
+	u64 idle_stamp;
 
 	trace_android_rvh_sched_newidle_balance(this_rq, rf, &pulled_task, &done);
 	if (done)
@@ -13440,7 +13461,7 @@ static int sched_balance_newidle(struct rq *this_rq, struct rq_flags *rf)
 	 * for CPU_NEWLY_IDLE, such that we measure the this duration
 	 * as idle time.
 	 */
-	this_rq->idle_stamp = rq_clock(this_rq);
+	idle_stamp = rq_clock(this_rq);
 
 	/*
 	 * Do not pull tasks towards !active CPUs...
@@ -13550,10 +13571,13 @@ out:
 	if (time_after(this_rq->next_balance, next_balance))
 		this_rq->next_balance = next_balance;
 
-	if (pulled_task)
+	if (pulled_task) {
 		this_rq->idle_stamp = 0;
-	else
+	} else {
+		/* Set it here on purpose. */
+		this_rq->idle_stamp = idle_stamp;
 		nohz_newidle_balance(this_rq);
+	}
 
 	rq_repin_lock(this_rq, rf);
 
