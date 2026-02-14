@@ -2152,6 +2152,8 @@ void enqueue_task(struct rq *rq, struct task_struct *p, int flags)
 
 	if (sched_core_enabled(rq))
 		sched_core_enqueue(rq, p);
+
+	update_rq_avg_idle(rq);
 }
 
 /*
