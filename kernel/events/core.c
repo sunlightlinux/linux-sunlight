@@ -6997,6 +6997,15 @@ static int perf_mmap_rb(struct vm_area_struct *vma, struct perf_event *event,
 		if (data_page_nr(event->rb) != nr_pages)
 			return -EINVAL;
 
+		/*
+		 * If this event doesn't have mmap_count, we're attempting to
+		 * create an alias of another event's mmap(); this would mean
+		 * both events will end up scribbling the same user_page;
+		 * which makes no sense.
+		 */
+		if (!refcount_read(&event->mmap_count))
+			return -EBUSY;
+
 		if (refcount_inc_not_zero(&event->rb->mmap_count)) {
 			/*
 			 * Success -- managed to mmap() the same buffer
@@ -7436,7 +7445,7 @@ static void perf_sample_regs_user(struct perf_regs *regs_user,
 	if (user_mode(regs)) {
 		regs_user->abi = perf_reg_abi(current);
 		regs_user->regs = regs;
-	} else if (!(current->flags & (PF_KTHREAD | PF_USER_WORKER))) {
+	} else if (is_user_task(current)) {
 		perf_get_regs_user(regs_user, regs);
 	} else {
 		regs_user->abi = PERF_SAMPLE_REGS_ABI_NONE;
@@ -8076,7 +8085,7 @@ static u64 perf_virt_to_phys(u64 virt)
 		 * Try IRQ-safe get_user_page_fast_only first.
 		 * If failed, leave phys_addr as 0.
 		 */
-		if (!(current->flags & (PF_KTHREAD | PF_USER_WORKER))) {
+		if (is_user_task(current)) {
 			struct page *p;
 
 			pagefault_disable();
@@ -8189,7 +8198,7 @@ perf_callchain(struct perf_event *event, struct pt_regs *regs)
 {
 	bool kernel = !event->attr.exclude_callchain_kernel;
 	bool user   = !event->attr.exclude_callchain_user &&
-		!(current->flags & (PF_KTHREAD | PF_USER_WORKER));
+		is_user_task(current);
 	/* Disallow cross-task user callchains. */
 	bool crosstask = event->ctx->task && event->ctx->task != current;
 	const u32 max_stack = event->attr.sample_max_stack;
@@ -11821,6 +11830,11 @@ static void perf_swevent_cancel_hrtimer(struct perf_event *event)
 	}
 }
 
+static void perf_swevent_destroy_hrtimer(struct perf_event *event)
+{
+	hrtimer_cancel(&event->hw.hrtimer);
+}
+
 static void perf_swevent_init_hrtimer(struct perf_event *event)
 {
 	struct hw_perf_event *hwc = &event->hw;
@@ -11829,6 +11843,7 @@ static void perf_swevent_init_hrtimer(struct perf_event *event)
 		return;
 
 	hrtimer_setup(&hwc->hrtimer, perf_swevent_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL_HARD);
+	event->destroy = perf_swevent_destroy_hrtimer;
 
 	/*
 	 * Since hrtimers have a fixed rate, we can do a static freq->period
