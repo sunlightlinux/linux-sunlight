@@ -9446,7 +9446,7 @@ void sched_move_task(struct task_struct *tsk, bool for_autogroup)
 	if (running)
 		put_prev_task(rq, tsk);
 
-	sched_change_group(tsk);
+	sched_change_group(tsk, new_group);
 	if (!for_autogroup)
 		scx_cgroup_move_task(tsk);
 
