@@ -8,6 +8,7 @@
 #include <linux/delay.h>
 #include <linux/file.h>
 #include <linux/fs.h>
+#include <linux/fs_parser.h>
 #include <linux/fs_stack.h>
 #include <linux/fsnotify.h>
 #include <linux/fsverity.h>
@@ -29,7 +30,11 @@
 #include "sysfs.h"
 #include "verity.h"
 
-static int incfs_remount_fs(struct super_block *sb, int *flags, char *data);
+static int incfs_parse_param(struct fs_context *fc, struct fs_parameter *param);
+static int incfs_get_tree(struct fs_context *fc);
+static int incfs_reconfigure(struct fs_context *fc);
+static void incfs_fc_free(struct fs_context *fc);
+static int incfs_fc_dup(struct fs_context *fc, struct fs_context *src_fc);
 
 static int dentry_revalidate(struct inode *dir, const struct qstr *name,
 		struct dentry *dentry, unsigned int flags);
@@ -78,11 +83,18 @@ static int incfs_show_options(struct seq_file *, struct dentry *);
 
 static const struct super_operations incfs_super_ops = {
 	.statfs = simple_statfs,
-	.remount_fs = incfs_remount_fs,
 	.alloc_inode	= incfs_alloc_inode,
 	.destroy_inode	= incfs_free_inode,
 	.evict_inode = incfs_evict_inode,
 	.show_options = incfs_show_options
+};
+
+static const struct fs_context_operations incfs_context_ops = {
+	.parse_param    = incfs_parse_param,
+	.get_tree       = incfs_get_tree,
+	.reconfigure    = incfs_reconfigure,
+	.free           = incfs_fc_free,
+	.dup		= incfs_fc_dup,
 };
 
 static int dir_rename_wrap(struct mnt_idmap *idmap, struct inode *old_dir,
@@ -123,7 +135,28 @@ static const struct address_space_operations incfs_address_space_ops = {
 
 static vm_fault_t incfs_fault(struct vm_fault *vmf)
 {
-	vmf->flags &= ~FAULT_FLAG_ALLOW_RETRY;
+	struct file *file = vmf->vma->vm_file;
+	struct data_file *df = get_incfs_data_file(file);
+	struct backing_file_context *bfc = df ? df->df_backing_file_context : NULL;
+
+	/*
+	 * This is something of a kludge
+	 * We want to retry if the read from the underlying file is interrupted,
+	 * but not if the read fails because the stored data is corrupt since the
+	 * latter causes an infinite loop.
+	 *
+	 * However, whether we wish to retry must be set before we call
+	 * filemap_fault, *and* there is no way of getting the read error code out
+	 * of filemap_fault.
+	 *
+	 * So unless there is a robust solution to both the above problems, we can
+	 * solve the actual issues we have encoutered by retrying unless there is
+	 * known corruption in the backing file. This does mean that we won't retry
+	 * with a corrupt backing file if a (good) read is interrupted, but we
+	 * don't really handle corruption well anyway at this time.
+	 */
+	if (bfc && bfc->bc_has_bad_block)
+		vmf->flags &= ~FAULT_FLAG_ALLOW_RETRY;
 	return filemap_fault(vmf);
 }
 
@@ -202,96 +235,6 @@ struct inode_search {
 	bool verity;
 };
 
-enum parse_parameter {
-	Opt_read_timeout,
-	Opt_readahead_pages,
-	Opt_rlog_pages,
-	Opt_rlog_wakeup_cnt,
-	Opt_report_uid,
-	Opt_sysfs_name,
-	Opt_err
-};
-
-static const match_table_t option_tokens = {
-	{ Opt_read_timeout, "read_timeout_ms=%u" },
-	{ Opt_readahead_pages, "readahead=%u" },
-	{ Opt_rlog_pages, "rlog_pages=%u" },
-	{ Opt_rlog_wakeup_cnt, "rlog_wakeup_cnt=%u" },
-	{ Opt_report_uid, "report_uid" },
-	{ Opt_sysfs_name, "sysfs_name=%s" },
-	{ Opt_err, NULL }
-};
-
-static void free_options(struct mount_options *opts)
-{
-	kfree(opts->sysfs_name);
-	opts->sysfs_name = NULL;
-}
-
-static int parse_options(struct mount_options *opts, char *str)
-{
-	substring_t args[MAX_OPT_ARGS];
-	int value;
-	char *position;
-
-	if (opts == NULL)
-		return -EFAULT;
-
-	*opts = (struct mount_options) {
-		.read_timeout_ms = 1000, /* Default: 1s */
-		.readahead_pages = 10,
-		.read_log_pages = 2,
-		.read_log_wakeup_count = 10,
-	};
-
-	if (str == NULL || *str == 0)
-		return 0;
-
-	while ((position = strsep(&str, ",")) != NULL) {
-		int token;
-
-		if (!*position)
-			continue;
-
-		token = match_token(position, option_tokens, args);
-
-		switch (token) {
-		case Opt_read_timeout:
-			if (match_int(&args[0], &value))
-				return -EINVAL;
-			if (value > 3600000)
-				return -EINVAL;
-			opts->read_timeout_ms = value;
-			break;
-		case Opt_readahead_pages:
-			if (match_int(&args[0], &value))
-				return -EINVAL;
-			opts->readahead_pages = value;
-			break;
-		case Opt_rlog_pages:
-			if (match_int(&args[0], &value))
-				return -EINVAL;
-			opts->read_log_pages = value;
-			break;
-		case Opt_rlog_wakeup_cnt:
-			if (match_int(&args[0], &value))
-				return -EINVAL;
-			opts->read_log_wakeup_count = value;
-			break;
-		case Opt_report_uid:
-			opts->report_uid = true;
-			break;
-		case Opt_sysfs_name:
-			opts->sysfs_name = match_strdup(&args[0]);
-			break;
-		default:
-			free_options(opts);
-			return -EINVAL;
-		}
-	}
-
-	return 0;
-}
 
 /* Read file size from the attribute. Quicker than reading the header */
 static u64 read_size_attr(struct dentry *backing_dentry)
@@ -598,6 +541,13 @@ err:
 		result = 0;
 	if (total_read < PAGE_SIZE)
 		memzero_page(page, total_read, PAGE_SIZE - total_read);
+
+	if (result == -EBADMSG) {
+		struct backing_file_context *bfc = df ? df->df_backing_file_context : NULL;
+
+		if (bfc)
+			bfc->bc_has_bad_block = 1;
+	}
 
 	if (result == 0)
 		SetPageUptodate(page);
@@ -1798,22 +1748,149 @@ static ssize_t incfs_listxattr(struct dentry *d, char *list, size_t size)
 	return vfs_listxattr(di->backing_path.dentry, list, size);
 }
 
-struct dentry *incfs_mount_fs(struct file_system_type *type, int flags,
-			      const char *dev_name, void *data)
+int incfs_init_fs_context(struct fs_context *fc)
 {
-	struct mount_options options = {};
+	struct mount_options *ctx = kzalloc(sizeof(struct mount_options), GFP_KERNEL);
+
+	if (!ctx)
+		return -ENOMEM;
+
+	*ctx = (struct mount_options) {
+		.read_timeout_ms = 1000, /* Default: 1s */
+		.readahead_pages = 10,
+		.read_log_pages = 2,
+		.read_log_wakeup_count = 10,
+	};
+
+	fc->fs_private = ctx;
+	fc->ops = &incfs_context_ops;
+
+	/* i_version is always enabled now */
+	fc->sb_flags |= SB_I_VERSION;
+	return 0;
+}
+
+enum {
+	Opt_read_timeout,
+	Opt_readahead_pages,
+	Opt_rlog_pages,
+	Opt_rlog_wakeup_cnt,
+	Opt_report_uid,
+	Opt_sysfs_name,
+};
+
+const struct fs_parameter_spec incfs_param_specs[] = {
+	fsparam_u32("read_timeout_ms", Opt_read_timeout),
+	fsparam_u32("readahead", Opt_readahead_pages),
+	fsparam_u32("rlog_pages", Opt_rlog_pages),
+	fsparam_u32("rlog_wakeup_cnt", Opt_rlog_wakeup_cnt),
+	fsparam_flag("report_uid", Opt_report_uid),
+	fsparam_file_or_string("sysfs_name", Opt_sysfs_name),
+	{}
+};
+
+static int incfs_parse_param(struct fs_context *fc, struct fs_parameter *param)
+{
+	struct mount_options *ctx = fc->fs_private;
+	struct fs_parse_result result;
+	int token = fs_parse(fc, incfs_param_specs, param, &result);
+
+	if (token < 0)
+		return token;
+
+	switch (token) {
+		case Opt_read_timeout:
+			if (result.uint_32 > 3600000)
+				return -EINVAL;
+			ctx->read_timeout_ms = result.uint_32;
+			return 0;
+		case Opt_readahead_pages:
+			ctx->readahead_pages = result.uint_32;
+			return 0;
+		case Opt_rlog_pages:
+			ctx->read_log_pages = result.uint_32;
+			return 0;
+		case Opt_rlog_wakeup_cnt:
+			ctx->read_log_wakeup_count = result.uint_32;
+			return 0;
+		case Opt_report_uid:
+			ctx->report_uid = true;
+			return 0;
+		case Opt_sysfs_name:
+			swap(ctx->sysfs_name, param->string);
+			return 0;
+		default:
+			return -EINVAL;
+	}
+}
+
+static int incfs_reconfigure(struct fs_context *fc)
+{
+	struct super_block *sb = fc->root->d_sb;
+	struct mount_options *ctx = fc->fs_private;
+	struct mount_info *mi = get_mount_info(sb);
+
+	pr_debug("incfs: %s\n", __func__);
+	sync_filesystem(sb);
+
+	if (ctx->report_uid != mi->mi_options.report_uid) {
+		pr_err("incfs: Can't change report_uid mount option on remount\n");
+		return -EOPNOTSUPP;
+	}
+
+	return incfs_realloc_mount_info(mi, ctx);
+}
+
+static void incfs_fc_free(struct fs_context *fc)
+{
+	struct mount_options *ctx = fc->fs_private;
+
+	if (!ctx)
+		return;
+	kfree(ctx->sysfs_name);
+	kfree(ctx);
+}
+
+static int incfs_fc_dup(struct fs_context *fc, struct fs_context *src_fc)
+{
+	struct mount_options *src_ctx = src_fc->fs_private;
+	struct mount_options *ctx;
+	int err;
+
+	if (!src_ctx)
+		return -EINVAL;
+
+	ctx = kmemdup(src_ctx, sizeof(struct mount_options), GFP_KERNEL);
+	if (!ctx)
+		return -ENOMEM;
+
+	if (ctx->sysfs_name) {
+		ctx->sysfs_name = kmemdup(ctx->sysfs_name, strlen(ctx->sysfs_name) + 1, GFP_KERNEL);
+		if (!ctx->sysfs_name) {
+			err = -ENOMEM;
+			goto free_ctx;
+		}
+	}
+
+	fc->fs_private = ctx;
+	return 0;
+
+free_ctx:
+	kfree(ctx);
+	return err;
+}
+
+static int incfs_fill_super(struct super_block *sb, struct fs_context *fc)
+{
+	struct mount_options *ctx = fc->fs_private;
 	struct mount_info *mi = NULL;
 	struct path backing_dir_path = {};
 	struct dentry *index_dir = NULL;
 	struct dentry *incomplete_dir = NULL;
 	struct super_block *src_fs_sb = NULL;
 	struct inode *root_inode = NULL;
-	struct super_block *sb = sget(type, NULL, set_anon_super, flags, NULL);
 	bool dir_created = false;
 	int error = 0;
-
-	if (IS_ERR(sb))
-		return ERR_CAST(sb);
 
 	sb->s_op = &incfs_super_ops;
 	set_default_d_op(sb, &incfs_dentry_ops);
@@ -1823,33 +1900,14 @@ struct dentry *incfs_mount_fs(struct file_system_type *type, int flags,
 	sb->s_blocksize = INCFS_DATA_FILE_BLOCK_SIZE;
 	sb->s_blocksize_bits = blksize_bits(sb->s_blocksize);
 	sb->s_xattr = incfs_xattr_ops;
+	sb->s_bdi->ra_pages = ctx->readahead_pages;
 
-	if (!dev_name) {
-		pr_err("incfs: Backing dir is not set, filesystem can't be mounted.\n");
-		error = -ENOENT;
-		goto err_deactivate;
-	}
-
-	error = parse_options(&options, (char *)data);
-	if (error != 0) {
-		pr_err("incfs: Options parsing error. %d\n", error);
-		goto err_deactivate;
-	}
-
-	sb->s_bdi->ra_pages = options.readahead_pages;
-	if (!dev_name) {
-		pr_err("incfs: Backing dir is not set, filesystem can't be mounted.\n");
-		error = -ENOENT;
-		goto err_free_opts;
-	}
-
-	error = kern_path(dev_name, LOOKUP_FOLLOW | LOOKUP_DIRECTORY,
+	error = kern_path(fc->source, LOOKUP_FOLLOW | LOOKUP_DIRECTORY,
 			&backing_dir_path);
 	if (error || backing_dir_path.dentry == NULL ||
 		!d_really_is_positive(backing_dir_path.dentry)) {
-		pr_err("incfs: Error accessing: %s.\n",
-			dev_name);
-		goto err_free_opts;
+		pr_err("incfs: Error accessing: %s.\n", fc->source);
+		goto err_deactivate;
 	}
 	src_fs_sb = backing_dir_path.dentry->d_sb;
 	sb->s_maxbytes = src_fs_sb->s_maxbytes;
@@ -1860,12 +1918,13 @@ struct dentry *incfs_mount_fs(struct file_system_type *type, int flags,
 		goto err_put_path;
 	}
 
-	mi = incfs_alloc_mount_info(sb, &options, &backing_dir_path);
+	mi = incfs_alloc_mount_info(sb, ctx, &backing_dir_path);
 	if (IS_ERR_OR_NULL(mi)) {
 		error = PTR_ERR(mi);
 		pr_err("incfs: Error allocating mount info. %d\n", error);
 		goto err_put_path;
 	}
+	fc->s_fs_info = mi;
 
 	sb->s_fs_info = mi;
 	mi->mi_backing_dir_path = backing_dir_path;
@@ -1874,7 +1933,7 @@ struct dentry *incfs_mount_fs(struct file_system_type *type, int flags,
 	if (IS_ERR_OR_NULL(index_dir)) {
 		error = PTR_ERR(index_dir);
 		pr_err("incfs: Can't find or create .index dir in %s\n",
-			dev_name);
+			fc->source);
 		/* No need to null index_dir since we don't put it */
 		goto err_put_path;
 	}
@@ -1888,7 +1947,7 @@ struct dentry *incfs_mount_fs(struct file_system_type *type, int flags,
 	if (IS_ERR_OR_NULL(incomplete_dir)) {
 		error = PTR_ERR(incomplete_dir);
 		pr_err("incfs: Can't find or create .incomplete dir in %s\n",
-			dev_name);
+			fc->source);
 		/* No need to null incomplete_dir since we don't put it */
 		goto err_put_path;
 	}
@@ -1911,47 +1970,19 @@ struct dentry *incfs_mount_fs(struct file_system_type *type, int flags,
 		goto err_put_path;
 
 	path_put(&backing_dir_path);
-	sb->s_flags |= SB_ACTIVE;
-
-	pr_debug("incfs: mount\n");
-	return dget(sb->s_root);
+	return 0;
 
 err_put_path:
 	path_put(&backing_dir_path);
-err_free_opts:
-	free_options(&options);
 err_deactivate:
 	deactivate_locked_super(sb);
 	pr_err("incfs: mount failed %d\n", error);
-	return ERR_PTR(error);
+	return error;
 }
 
-static int incfs_remount_fs(struct super_block *sb, int *flags, char *data)
+static int incfs_get_tree(struct fs_context *fc)
 {
-	struct mount_options options;
-	struct mount_info *mi = get_mount_info(sb);
-	int err = 0;
-
-	sync_filesystem(sb);
-	err = parse_options(&options, (char *)data);
-	if (err)
-		return err;
-
-	if (options.report_uid != mi->mi_options.report_uid) {
-		pr_err("incfs: Can't change report_uid mount option on remount\n");
-		err = -EOPNOTSUPP;
-		goto out;
-	}
-
-	err = incfs_realloc_mount_info(mi, &options);
-	if (err)
-		goto out;
-
-	pr_debug("incfs: remount\n");
-
-out:
-	free_options(&options);
-	return err;
+	return get_tree_nodev(fc, incfs_fill_super);
 }
 
 void incfs_kill_sb(struct super_block *sb)
@@ -1959,7 +1990,7 @@ void incfs_kill_sb(struct super_block *sb)
 	struct mount_info *mi = sb->s_fs_info;
 	struct inode *dinode = NULL;
 
-	pr_debug("incfs: unmount\n");
+	pr_debug("incfs: incfs_kill_sb\n");
 
 	/*
 	 * We must kill the super before freeing mi, since killing the super

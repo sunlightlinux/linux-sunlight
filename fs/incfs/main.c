@@ -3,6 +3,7 @@
  * Copyright 2018 Google LLC
  */
 #include <linux/fs.h>
+#include <linux/fs_parser.h>
 #include <linux/init.h>
 #include <linux/module.h>
 
@@ -11,12 +12,13 @@
 #include "sysfs.h"
 #include "vfs.h"
 
-static struct file_system_type incfs_fs_type = {
-	.owner = THIS_MODULE,
-	.name = INCFS_NAME,
-	.mount = incfs_mount_fs,
-	.kill_sb = incfs_kill_sb,
-	.fs_flags = 0
+struct file_system_type incfs_fs_type = {
+	.owner			= THIS_MODULE,
+	.name			= INCFS_NAME,
+	.init_fs_context	= incfs_init_fs_context,
+	.parameters		= incfs_param_specs,
+	.kill_sb		= incfs_kill_sb,
+	.fs_flags		= 0
 };
 
 static int __init init_incfs_module(void)

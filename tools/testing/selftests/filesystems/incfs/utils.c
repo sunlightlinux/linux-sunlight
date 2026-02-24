@@ -19,6 +19,8 @@
 #include <openssl/sha.h>
 #include <openssl/md5.h>
 
+#include <kselftest.h>
+
 #include "utils.h"
 
 #ifndef __S_IFREG

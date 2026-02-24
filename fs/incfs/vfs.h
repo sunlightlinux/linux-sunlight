@@ -10,8 +10,10 @@ extern const struct file_operations incfs_file_ops;
 extern const struct inode_operations incfs_file_inode_ops;
 
 void incfs_kill_sb(struct super_block *sb);
-struct dentry *incfs_mount_fs(struct file_system_type *type, int flags,
-			      const char *dev_name, void *data);
+int incfs_init_fs_context(struct fs_context *fc);
+
+extern const struct fs_parameter_spec incfs_param_specs[];
+
 int incfs_link(struct dentry *what, struct dentry *where);
 int incfs_unlink(struct dentry *dentry);
 

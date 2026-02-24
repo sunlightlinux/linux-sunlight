@@ -1,2 +1,1 @@
 per-file crypto/**=file:/crypto/OWNERS
-per-file net/**=file:/net/OWNERS

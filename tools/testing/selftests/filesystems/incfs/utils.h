@@ -7,8 +7,6 @@
 
 #include <include/uapi/linux/incrementalfs.h>
 
-#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof(arr[0]))
-
 #define __packed __attribute__((__packed__))
 
 #ifdef __LP64__

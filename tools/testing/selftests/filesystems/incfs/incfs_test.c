@@ -499,7 +499,7 @@ static int emit_test_blocks(const char *mnt_dir, struct test_file *file,
 	}
 	if (error) {
 		ksft_print_msg(
-			"Writing data block error. Write returned: %d. Error:%s\n",
+			"Writing data block error. Write returned: %ld. Error:%s\n",
 			write_res, strerror(-error));
 	}
 
@@ -1244,7 +1244,7 @@ static int basic_file_ops_test(const char *mount_dir)
 		size = get_file_size(file_path);
 		free(file_path);
 		if (size != file->size) {
-			ksft_print_msg("Wrong size %lld of %s.\n",
+			ksft_print_msg("Wrong size %ld of %s.\n",
 				size, file->name);
 			goto failure;
 		}
@@ -1268,7 +1268,7 @@ static int basic_file_ops_test(const char *mount_dir)
 
 		size = get_file_size(dst_name);
 		if (size != file->size) {
-			ksft_print_msg("Wrong size %lld of %s.\n",
+			ksft_print_msg("Wrong size %ld of %s.\n",
 				size, file->name);
 			goto failure;
 		}
@@ -1291,7 +1291,7 @@ static int basic_file_ops_test(const char *mount_dir)
 
 		size = get_file_size(dst_name);
 		if (size != file->size) {
-			ksft_print_msg("Wrong size %lld of %s.\n",
+			ksft_print_msg("Wrong size %ld of %s.\n",
 				size, file->name);
 			goto failure;
 		}
@@ -2890,7 +2890,7 @@ static int validate_mapped_file(const char *orig_name, const char *name,
 	}
 
 	if (size != st.st_size) {
-		ksft_print_msg("Mismatched file sizes for file %s - expected %llu, got %llu\n",
+		ksft_print_msg("Mismatched file sizes for file %s - expected %lu, got %lu\n",
 				   name, size, st.st_size);
 		goto failure;
 	}
@@ -2922,14 +2922,14 @@ static int validate_mapped_file(const char *orig_name, const char *name,
 		if (orig_read < mapped_read ||
 		    mapped_read != min(size - block,
 				       INCFS_DATA_FILE_BLOCK_SIZE)) {
-			ksft_print_msg("Failed to read enough data: %llu %llu %llu %lld %lld\n",
+			ksft_print_msg("Failed to read enough data: %lu %lu %lu %lu %ld\n",
 				       block, size, offset, orig_read,
 				       mapped_read);
 			goto failure;
 		}
 
 		if (memcmp(orig_data, data, mapped_read)) {
-			ksft_print_msg("Data doesn't match: %llu %llu %llu %lld %lld\n",
+			ksft_print_msg("Data doesn't match: %lu %lu %lu %lu %ld\n",
 				       block, size, offset, orig_read,
 				       mapped_read);
 			goto failure;
@@ -4799,5 +4799,11 @@ int main(int argc, char *argv[])
 
 	umount2(mount_dir, MNT_FORCE);
 	rmdir(mount_dir);
-	return !ksft_get_fail_cnt() ? ksft_exit_pass() : ksft_exit_fail();
+	if (ksft_get_fail_cnt()) {
+		ksft_exit_fail();
+		return 1;
+	}
+
+	ksft_exit_pass();
+	return 0;
 }

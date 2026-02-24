@@ -3,6 +3,7 @@
  * Copyright 2021 Google LLC
  */
 #include <linux/fs.h>
+#include <linux/fs_parser.h>
 #include <linux/kobject.h>
 
 #include <uapi/linux/incrementalfs.h>
@@ -35,6 +36,7 @@ DECLARE_FEATURE_FLAG(zstd);
 DECLARE_FEATURE_FLAG(v2);
 DECLARE_FEATURE_FLAG(bugfix_throttling);
 DECLARE_FEATURE_FLAG(bugfix_inode_eviction);
+DECLARE_FEATURE_FLAG(bugfix_retry_page_fault);
 
 static struct attribute *attributes[] = {
 	&corefs_attr.attr,
@@ -42,6 +44,7 @@ static struct attribute *attributes[] = {
 	&v2_attr.attr,
 	&bugfix_throttling_attr.attr,
 	&bugfix_inode_eviction_attr.attr,
+	&bugfix_retry_page_fault_attr.attr,
 	NULL,
 };
 

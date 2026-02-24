@@ -17,6 +17,8 @@
 #include <ctype.h>
 #include <unistd.h>
 
+#include <kselftest.h>
+
 #include "utils.h"
 
 #define err_msg(...)                                                           \
