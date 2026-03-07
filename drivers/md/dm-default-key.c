@@ -325,7 +325,21 @@ static int default_key_map(struct dm_target *ti, struct bio *bio)
 
 	bio_crypt_set_ctx(bio, &dkc->key, dun, GFP_NOIO);
 
-	return DM_MAPIO_REMAPPED;
+	/*
+	 * Since we've added an encryption context to the bio and
+	 * blk-crypto-fallback may be needed to process it, it's necessary to
+	 * use the fallback-aware bio submission code rather than
+	 * unconditionally returning DM_MAPIO_REMAPPED.
+	 *
+	 * To get the correct accounting for a dm target in the case where
+	 * __blk_crypto_submit_bio() doesn't take ownership of the bio (returns
+	 * true), call __blk_crypto_submit_bio() directly and return
+	 * DM_MAPIO_REMAPPED in that case, rather than relying on
+	 * blk_crypto_submit_bio() which calls submit_bio() in that case.
+	 */
+	if (__blk_crypto_submit_bio(bio))
+		return DM_MAPIO_REMAPPED;
+	return DM_MAPIO_SUBMITTED;
 }
 
 static void default_key_status(struct dm_target *ti, status_type_t type,

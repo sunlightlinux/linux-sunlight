@@ -90,8 +90,8 @@ _COMMON_GKI_MODULES_LIST = [
     "net/vmw_vsock/vmw_vsock_virtio_transport.ko",
 ]
 
-# Deprecated - Use `get_gki_modules_list` function instead.
-COMMON_GKI_MODULES_LIST = _COMMON_GKI_MODULES_LIST
+_RUST_GKI_MODULES_LIST = [
+]
 
 _ARM_GKI_MODULES_LIST = [
     # keep sorted
@@ -173,9 +173,15 @@ def get_gki_modules_list(arch = None, map_each = None):
         list comprehension); instead, use the |map_each| argument.
     """
 
-    return select({
-        "//conditions:default": _get_gki_modules_list_minus_select(arch, map_each),
+    ret = _get_gki_modules_list_minus_select(arch, map_each)
+
+    # CONFIG_RUST depends on !CONFIG_KASAN_SW_TAGS
+    ret += select({
+        "//build/kernel/kleaf:kasan_sw_tags_is_true": [],
+        "//conditions:default": _apply(map_each, _RUST_GKI_MODULES_LIST),
     })
+
+    return ret
 
 # buildifier: disable=unnamed-macro
 def get_gki_modules_superset(arch = None, map_each = None):
@@ -194,7 +200,8 @@ def get_gki_modules_superset(arch = None, map_each = None):
     Returns:
         A list that contains the superset of GKI modules for the given |arch|.
     """
-    return _get_gki_modules_list_minus_select(arch, map_each)
+    return _get_gki_modules_list_minus_select(arch, map_each) + \
+           _apply(map_each, _RUST_GKI_MODULES_LIST)
 
 _KUNIT_FRAMEWORK_MODULES = [
     "lib/kunit/kunit.ko",

@@ -8,6 +8,7 @@
 
 # Main reviewers
 adelva@google.com
+cmllamas@google.com
 gprocida@google.com
 isaacmanjarres@google.com
 joneslee@google.com
@@ -24,7 +25,6 @@ szuweilin@google.com #{LAST_RESORT_SUGGESTION}
 
 # Backup
 kiyoungkim@google.com #{LAST_RESORT_SUGGESTION}
-malchev@google.com #{LAST_RESORT_SUGGESTION}
 sspatil@google.com #{LAST_RESORT_SUGGESTION}
 
 # Give DrNo Exceptions to TEST_MAPPING or test xml configs
