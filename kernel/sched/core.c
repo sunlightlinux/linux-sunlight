@@ -123,6 +123,9 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(sched_util_est_se_tp);
 EXPORT_TRACEPOINT_SYMBOL_GPL(sched_update_nr_running_tp);
 EXPORT_TRACEPOINT_SYMBOL_GPL(sched_compute_energy_tp);
 EXPORT_TRACEPOINT_SYMBOL_GPL(sched_switch);
+EXPORT_TRACEPOINT_SYMBOL_GPL(sched_entry_tp);
+EXPORT_TRACEPOINT_SYMBOL_GPL(sched_exit_tp);
+EXPORT_TRACEPOINT_SYMBOL_GPL(sched_set_need_resched_tp);
 
 DEFINE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
 EXPORT_SYMBOL_GPL(runqueues);
@@ -1151,6 +1154,7 @@ void __trace_set_need_resched(struct task_struct *curr, int tif)
 {
 	trace_sched_set_need_resched_tp(curr, smp_processor_id(), tif);
 }
+EXPORT_SYMBOL_GPL(__trace_set_need_resched);
 
 void resched_curr(struct rq *rq)
 {
@@ -9227,6 +9231,7 @@ void sched_move_task(struct task_struct *tsk, bool for_autogroup)
 {
 	unsigned int queue_flags = DEQUEUE_SAVE | DEQUEUE_MOVE;
 	bool resched = false;
+	bool queued = false;
 	struct rq *rq;
 
 	CLASS(task_rq_lock, rq_guard)(tsk);
@@ -9238,10 +9243,13 @@ void sched_move_task(struct task_struct *tsk, bool for_autogroup)
 			scx_cgroup_move_task(tsk);
 		if (scope->running)
 			resched = true;
+		queued = scope->queued;
 	}
 
 	if (resched)
 		resched_curr(rq);
+	else if (queued)
+		wakeup_preempt(rq, tsk, 0);
 
 	__balance_callbacks(rq, &rq_guard.rf);
 }
@@ -10881,10 +10889,9 @@ void sched_mm_cid_exit(struct task_struct *t)
 					return;
 				/*
 				 * Mode change. The task has the CID unset
-				 * already. The CPU CID is still valid and
-				 * does not have MM_CID_TRANSIT set as the
-				 * mode change has just taken effect under
-				 * mm::mm_cid::lock. Drop it.
+				 * already and dealt with an eventually set
+				 * TRANSIT bit. If the CID is owned by the CPU
+				 * then drop it.
 				 */
 				mm_drop_cid_on_cpu(mm, this_cpu_ptr(mm->mm_cid.pcpu));
 			}
