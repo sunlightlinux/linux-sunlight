@@ -4186,7 +4186,7 @@ static struct clk *alloc_clk(struct clk_core *core, const char *dev_id,
 {
 	struct clk *clk;
 
-	clk = kzalloc(sizeof(*clk), GFP_KERNEL);
+	clk = kzalloc_obj(*clk);
 	if (!clk)
 		return ERR_PTR(-ENOMEM);
 
@@ -4303,7 +4303,7 @@ static int clk_core_populate_parent_map(struct clk_core *core,
 	 * Avoid unnecessary string look-ups of clk_core's possible parents by
 	 * having a cache of names/clk_hw pointers to clk_core pointers.
 	 */
-	parents = kcalloc(num_parents, sizeof(*parents), GFP_KERNEL);
+	parents = kzalloc_objs(*parents, num_parents);
 	core->parents = parents;
 	if (!parents)
 		return -ENOMEM;
@@ -4393,7 +4393,7 @@ __clk_register(struct device *dev, struct device_node *np, struct clk_hw *hw)
 	 */
 	hw->init = NULL;
 
-	core = kzalloc(sizeof(*core), GFP_KERNEL);
+	core = kzalloc_obj(*core);
 	if (!core) {
 		ret = -ENOMEM;
 		goto fail_out;
@@ -4878,7 +4878,7 @@ int clk_notifier_register(struct clk *clk, struct notifier_block *nb)
 			goto found;
 
 	/* if clk wasn't in the notifier list, allocate new clk_notifier */
-	cn = kzalloc(sizeof(*cn), GFP_KERNEL);
+	cn = kzalloc_obj(*cn);
 	if (!cn)
 		goto out;
 
@@ -5074,7 +5074,7 @@ int of_clk_add_provider(struct device_node *np,
 	if (!np)
 		return 0;
 
-	cp = kzalloc(sizeof(*cp), GFP_KERNEL);
+	cp = kzalloc_obj(*cp);
 	if (!cp)
 		return -ENOMEM;
 
@@ -5116,7 +5116,7 @@ int of_clk_add_hw_provider(struct device_node *np,
 	if (!np)
 		return 0;
 
-	cp = kzalloc(sizeof(*cp), GFP_KERNEL);
+	cp = kzalloc_obj(*cp);
 	if (!cp)
 		return -ENOMEM;
 
@@ -5613,7 +5613,7 @@ void __init of_clk_init(const struct of_device_id *matches)
 		if (!of_device_is_available(np))
 			continue;
 
-		parent = kzalloc(sizeof(*parent), GFP_KERNEL);
+		parent = kzalloc_obj(*parent);
 		if (!parent) {
 			list_for_each_entry_safe(clk_provider, next,
 						 &clk_provider_list, node) {

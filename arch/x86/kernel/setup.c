@@ -437,8 +437,14 @@ int __init ima_free_kexec_buffer(void)
 
 int __init ima_get_kexec_buffer(void **addr, size_t *size)
 {
+	int ret;
+
 	if (!ima_kexec_buffer_size)
 		return -ENOENT;
+
+	ret = ima_validate_range(ima_kexec_buffer_phys, ima_kexec_buffer_size);
+	if (ret)
+		return ret;
 
 	*addr = __va(ima_kexec_buffer_phys);
 	*size = ima_kexec_buffer_size;
@@ -761,7 +767,7 @@ static void __init trim_bios_range(void)
 	 * area (640Kb -> 1Mb) as RAM even though it is not.
 	 * take them out.
 	 */
-	e820__range_remove(BIOS_BEGIN, BIOS_END - BIOS_BEGIN, E820_TYPE_RAM, 1);
+	e820__range_remove(BIOS_BEGIN, BIOS_END - BIOS_BEGIN, E820_TYPE_RAM);
 
 	e820__update_table(e820_table);
 }
@@ -783,7 +789,7 @@ static void __init e820_add_kernel_range(void)
 		return;
 
 	pr_warn(".text .data .bss are not marked as E820_TYPE_RAM!\n");
-	e820__range_remove(start, size, E820_TYPE_RAM, 0);
+	e820__range_remove(start, size, 0);
 	e820__range_add(start, size, E820_TYPE_RAM);
 }
 
@@ -1013,11 +1019,9 @@ void __init setup_arch(char **cmdline_p)
 	trim_bios_range();
 #ifdef CONFIG_X86_32
 	if (ppro_with_ram_bug()) {
-		e820__range_update(0x70000000ULL, 0x40000ULL, E820_TYPE_RAM,
-				  E820_TYPE_RESERVED);
+		pr_info("Applying PPro RAM bug workaround: punching 256 kB hole at 1.75 GB physical.\n");
+		e820__range_update(0x70000000ULL, SZ_256K, E820_TYPE_RAM, E820_TYPE_RESERVED);
 		e820__update_table(e820_table);
-		printk(KERN_INFO "fixed physical RAM map:\n");
-		e820__print_table("bad_ppro");
 	}
 #else
 	early_gart_iommu_check();
@@ -1186,11 +1190,6 @@ void __init setup_arch(char **cmdline_p)
 
 	initmem_init();
 	dma_contiguous_reserve(max_pfn_mapped << PAGE_SHIFT);
-
-	if (boot_cpu_has(X86_FEATURE_GBPAGES)) {
-		hugetlb_cma_reserve(PUD_SHIFT - PAGE_SHIFT);
-		hugetlb_bootmem_alloc();
-	}
 
 	/*
 	 * Reserve memory for crash kernel after SRAT is parsed so that it

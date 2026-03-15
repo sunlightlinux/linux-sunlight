@@ -231,6 +231,7 @@ static inline unsigned short drbg_sec_strength(drbg_flag_t flags)
  */
 static bool drbg_fips_continuous_test(struct drbg_state *drbg,
 				      const unsigned char *entropy)
+	__must_hold(&drbg->drbg_mutex)
 {
 	unsigned short entropylen = drbg_sec_strength(drbg->core->flags);
 
@@ -845,6 +846,7 @@ static inline int __drbg_seed(struct drbg_state *drbg, struct list_head *seed,
 static inline void drbg_get_random_bytes(struct drbg_state *drbg,
 					 unsigned char *entropy,
 					 unsigned int entropylen)
+	__must_hold(&drbg->drbg_mutex)
 {
 	do
 		get_random_bytes(entropy, entropylen);
@@ -852,6 +854,7 @@ static inline void drbg_get_random_bytes(struct drbg_state *drbg,
 }
 
 static int drbg_seed_from_random(struct drbg_state *drbg)
+	__must_hold(&drbg->drbg_mutex)
 {
 	struct drbg_string data;
 	LIST_HEAD(seedlist);
@@ -906,6 +909,7 @@ static bool drbg_nopr_reseed_interval_elapsed(struct drbg_state *drbg)
  */
 static int drbg_seed(struct drbg_state *drbg, struct drbg_string *pers,
 		     bool reseed)
+	__must_hold(&drbg->drbg_mutex)
 {
 	int ret;
 	unsigned char entropy[((32 + 16) * 2)];
@@ -1138,6 +1142,7 @@ err:
 static int drbg_generate(struct drbg_state *drbg,
 			 unsigned char *buf, unsigned int buflen,
 			 struct drbg_string *addtl)
+	__must_hold(&drbg->drbg_mutex)
 {
 	int len = 0;
 	LIST_HEAD(addtllist);
@@ -1517,7 +1522,7 @@ static int drbg_init_sym_kernel(struct drbg_state *drbg)
 	unsigned int alignmask;
 	char ctr_name[CRYPTO_MAX_ALG_NAME];
 
-	aeskey = kzalloc(sizeof(*aeskey), GFP_KERNEL);
+	aeskey = kzalloc_obj(*aeskey);
 	if (!aeskey)
 		return -ENOMEM;
 	drbg->priv_data = aeskey;
@@ -1756,11 +1761,11 @@ static inline int __init drbg_healthcheck_sanity(void)
 	drbg_convert_tfm_core("drbg_nopr_hmac_sha512", &coreref, &pr);
 #endif
 
-	drbg = kzalloc(sizeof(struct drbg_state), GFP_KERNEL);
+	drbg = kzalloc_obj(struct drbg_state);
 	if (!drbg)
 		return -ENOMEM;
 
-	mutex_init(&drbg->drbg_mutex);
+	guard(mutex_init)(&drbg->drbg_mutex);
 	drbg->core = &drbg_cores[coreref];
 	drbg->reseed_threshold = drbg_max_requests(drbg);
 

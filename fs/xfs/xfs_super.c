@@ -712,8 +712,8 @@ xfs_fs_destroy_inode(
 	trace_xfs_destroy_inode(ip);
 
 	ASSERT(!rwsem_is_locked(&inode->i_rwsem));
-	XFS_STATS_INC(ip->i_mount, vn_rele);
-	XFS_STATS_INC(ip->i_mount, vn_remove);
+	XFS_STATS_INC(ip->i_mount, xs_inode_destroy);
+	XFS_STATS_INC(ip->i_mount, xs_inode_destroy2);
 	xfs_inode_mark_reclaimable(ip);
 }
 
@@ -824,15 +824,6 @@ xfs_fs_sync_fs(
 	error = xfs_log_force(mp, XFS_LOG_SYNC);
 	if (error)
 		return error;
-
-	if (laptop_mode) {
-		/*
-		 * The disk must be active because we're syncing.
-		 * We schedule log work now (now that the disk is
-		 * active) instead of later (when it might not be).
-		 */
-		flush_delayed_work(&mp->m_log->l_work);
-	}
 
 	/*
 	 * If we are called with page faults frozen out, it means we are about
@@ -2244,12 +2235,11 @@ xfs_init_fs_context(
 	struct xfs_mount	*mp;
 	int			i;
 
-	mp = kzalloc(sizeof(struct xfs_mount), GFP_KERNEL);
+	mp = kzalloc_obj(struct xfs_mount);
 	if (!mp)
 		return -ENOMEM;
 #ifdef DEBUG
-	mp->m_errortag = kcalloc(XFS_ERRTAG_MAX, sizeof(*mp->m_errortag),
-			GFP_KERNEL);
+	mp->m_errortag = kzalloc_objs(*mp->m_errortag, XFS_ERRTAG_MAX);
 	if (!mp->m_errortag) {
 		kfree(mp);
 		return -ENOMEM;

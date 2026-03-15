@@ -58,8 +58,9 @@ enum _slab_flag_bits {
 #endif
 	_SLAB_OBJECT_POISON,
 	_SLAB_CMPXCHG_DOUBLE,
-#ifdef CONFIG_SLAB_OBJ_EXT
 	_SLAB_NO_OBJ_EXT,
+#if defined(CONFIG_SLAB_OBJ_EXT) && defined(CONFIG_64BIT)
+	_SLAB_OBJ_EXT_IN_OBJ,
 #endif
 	_SLAB_FLAGS_LAST_BIT
 };
@@ -239,10 +240,12 @@ enum _slab_flag_bits {
 #define SLAB_TEMPORARY		SLAB_RECLAIM_ACCOUNT	/* Objects are short-lived */
 
 /* Slab created using create_boot_cache */
-#ifdef CONFIG_SLAB_OBJ_EXT
 #define SLAB_NO_OBJ_EXT		__SLAB_FLAG_BIT(_SLAB_NO_OBJ_EXT)
+
+#if defined(CONFIG_SLAB_OBJ_EXT) && defined(CONFIG_64BIT)
+#define SLAB_OBJ_EXT_IN_OBJ	__SLAB_FLAG_BIT(_SLAB_OBJ_EXT_IN_OBJ)
 #else
-#define SLAB_NO_OBJ_EXT		__SLAB_FLAG_UNUSED
+#define SLAB_OBJ_EXT_IN_OBJ	__SLAB_FLAG_UNUSED
 #endif
 
 /*
@@ -300,24 +303,26 @@ struct kmem_cache_args {
 	unsigned int usersize;
 	/**
 	 * @freeptr_offset: Custom offset for the free pointer
-	 * in &SLAB_TYPESAFE_BY_RCU caches
+	 * in caches with &SLAB_TYPESAFE_BY_RCU or @ctor
 	 *
-	 * By default &SLAB_TYPESAFE_BY_RCU caches place the free pointer
-	 * outside of the object. This might cause the object to grow in size.
-	 * Cache creators that have a reason to avoid this can specify a custom
-	 * free pointer offset in their struct where the free pointer will be
-	 * placed.
+	 * By default, &SLAB_TYPESAFE_BY_RCU and @ctor caches place the free
+	 * pointer outside of the object. This might cause the object to grow
+	 * in size. Cache creators that have a reason to avoid this can specify
+	 * a custom free pointer offset in their data structure where the free
+	 * pointer will be placed.
 	 *
-	 * Note that placing the free pointer inside the object requires the
-	 * caller to ensure that no fields are invalidated that are required to
-	 * guard against object recycling (See &SLAB_TYPESAFE_BY_RCU for
-	 * details).
+	 * For caches with &SLAB_TYPESAFE_BY_RCU, the caller must ensure that
+	 * the free pointer does not overlay fields required to guard against
+	 * object recycling (See &SLAB_TYPESAFE_BY_RCU for details).
+	 *
+	 * For caches with @ctor, the caller must ensure that the free pointer
+	 * does not overlay fields initialized by the constructor.
+	 *
+	 * Currently, only caches with &SLAB_TYPESAFE_BY_RCU or @ctor
+	 * may specify @freeptr_offset.
 	 *
 	 * Using %0 as a value for @freeptr_offset is valid. If @freeptr_offset
-	 * is specified, %use_freeptr_offset must be set %true.
-	 *
-	 * Note that @ctor currently isn't supported with custom free pointers
-	 * as a @ctor requires an external free pointer.
+	 * is specified, @use_freeptr_offset must be set %true.
 	 */
 	unsigned int freeptr_offset;
 	/**
@@ -508,23 +513,10 @@ void * __must_check krealloc_node_align_noprof(const void *objp, size_t new_size
 void kfree(const void *objp);
 void kfree_nolock(const void *objp);
 void kfree_sensitive(const void *objp);
-size_t __ksize(const void *objp);
 
 DEFINE_FREE(kfree, void *, if (!IS_ERR_OR_NULL(_T)) kfree(_T))
 DEFINE_FREE(kfree_sensitive, void *, if (_T) kfree_sensitive(_T))
 
-/**
- * ksize - Report actual allocation size of associated object
- *
- * @objp: Pointer returned from a prior kmalloc()-family allocation.
- *
- * This should not be used for writing beyond the originally requested
- * allocation size. Either use krealloc() or round up the allocation size
- * with kmalloc_size_roundup() prior to allocation. If this is used to
- * access beyond the originally requested allocation size, UBSAN_BOUNDS
- * and/or FORTIFY_SOURCE may trip, since they only know about the
- * originally allocated size via the __alloc_size attribute.
- */
 size_t ksize(const void *objp);
 
 #ifdef CONFIG_PRINTK
@@ -999,11 +991,7 @@ void *kmalloc_nolock_noprof(size_t size, gfp_t gfp_flags, int node);
 ({									\
 	const size_t __count = (COUNT);					\
 	const size_t __obj_size = struct_size_t(TYPE, FAM, __count);	\
-	TYPE *__obj_ptr;						\
-	if (WARN_ON_ONCE(overflows_flex_counter_type(TYPE, FAM,	__count))) \
-		__obj_ptr = NULL;					\
-	else								\
-		__obj_ptr = KMALLOC(__obj_size, GFP);			\
+	TYPE *__obj_ptr = KMALLOC(__obj_size, GFP);			\
 	if (__obj_ptr)							\
 		__set_flex_counter(__obj_ptr->FAM, __count);		\
 	__obj_ptr;							\
@@ -1017,8 +1005,8 @@ void *kmalloc_nolock_noprof(size_t size, gfp_t gfp_flags, int node);
  * Returns: newly allocated pointer to a @VAR_OR_TYPE on success, or NULL
  * on failure.
  */
-#define kmalloc_obj(VAR_OR_TYPE, GFP)			\
-	__alloc_objs(kmalloc, GFP, typeof(VAR_OR_TYPE), 1)
+#define kmalloc_obj(VAR_OR_TYPE, ...) \
+	__alloc_objs(kmalloc, default_gfp(__VA_ARGS__), typeof(VAR_OR_TYPE), 1)
 
 /**
  * kmalloc_objs - Allocate an array of the given type
@@ -1029,8 +1017,8 @@ void *kmalloc_nolock_noprof(size_t size, gfp_t gfp_flags, int node);
  * Returns: newly allocated pointer to array of @VAR_OR_TYPE on success,
  * or NULL on failure.
  */
-#define kmalloc_objs(VAR_OR_TYPE, COUNT, GFP)		\
-	__alloc_objs(kmalloc, GFP, typeof(VAR_OR_TYPE), COUNT)
+#define kmalloc_objs(VAR_OR_TYPE, COUNT, ...) \
+	__alloc_objs(kmalloc, default_gfp(__VA_ARGS__), typeof(VAR_OR_TYPE), COUNT)
 
 /**
  * kmalloc_flex - Allocate a single instance of the given flexible structure
@@ -1044,32 +1032,32 @@ void *kmalloc_nolock_noprof(size_t size, gfp_t gfp_flags, int node);
  * will immediately fail if @COUNT is larger than what the type of the
  * struct's counter variable can represent.
  */
-#define kmalloc_flex(VAR_OR_TYPE, FAM, COUNT, GFP)	\
-	__alloc_flex(kmalloc, GFP, typeof(VAR_OR_TYPE),	FAM, COUNT)
+#define kmalloc_flex(VAR_OR_TYPE, FAM, COUNT, ...) \
+	__alloc_flex(kmalloc, default_gfp(__VA_ARGS__), typeof(VAR_OR_TYPE), FAM, COUNT)
 
 /* All kzalloc aliases for kmalloc_(obj|objs|flex). */
-#define kzalloc_obj(P, GFP)				\
-	__alloc_objs(kzalloc, GFP, typeof(P), 1)
-#define kzalloc_objs(P, COUNT, GFP)			\
-	__alloc_objs(kzalloc, GFP, typeof(P), COUNT)
-#define kzalloc_flex(P, FAM, COUNT, GFP)		\
-	__alloc_flex(kzalloc, GFP, typeof(P), FAM, COUNT)
+#define kzalloc_obj(P, ...) \
+	__alloc_objs(kzalloc, default_gfp(__VA_ARGS__), typeof(P), 1)
+#define kzalloc_objs(P, COUNT, ...) \
+	__alloc_objs(kzalloc, default_gfp(__VA_ARGS__), typeof(P), COUNT)
+#define kzalloc_flex(P, FAM, COUNT, ...)		\
+	__alloc_flex(kzalloc, default_gfp(__VA_ARGS__), typeof(P), FAM, COUNT)
 
 /* All kvmalloc aliases for kmalloc_(obj|objs|flex). */
-#define kvmalloc_obj(P, GFP)				\
-	__alloc_objs(kvmalloc, GFP, typeof(P), 1)
-#define kvmalloc_objs(P, COUNT, GFP)			\
-	__alloc_objs(kvmalloc, GFP, typeof(P), COUNT)
-#define kvmalloc_flex(P, FAM, COUNT, GFP)		\
-	__alloc_flex(kvmalloc, GFP, typeof(P), FAM, COUNT)
+#define kvmalloc_obj(P, ...) \
+	__alloc_objs(kvmalloc, default_gfp(__VA_ARGS__), typeof(P), 1)
+#define kvmalloc_objs(P, COUNT, ...) \
+	__alloc_objs(kvmalloc, default_gfp(__VA_ARGS__), typeof(P), COUNT)
+#define kvmalloc_flex(P, FAM, COUNT, ...) \
+	__alloc_flex(kvmalloc, default_gfp(__VA_ARGS__), typeof(P), FAM, COUNT)
 
 /* All kvzalloc aliases for kmalloc_(obj|objs|flex). */
-#define kvzalloc_obj(P, GFP)				\
-	__alloc_objs(kvzalloc, GFP, typeof(P), 1)
-#define kvzalloc_objs(P, COUNT, GFP)			\
-	__alloc_objs(kvzalloc, GFP, typeof(P), COUNT)
-#define kvzalloc_flex(P, FAM, COUNT, GFP)		\
-	__alloc_flex(kvzalloc, GFP, typeof(P), FAM, COUNT)
+#define kvzalloc_obj(P, ...) \
+	__alloc_objs(kvzalloc, default_gfp(__VA_ARGS__), typeof(P), 1)
+#define kvzalloc_objs(P, COUNT, ...) \
+	__alloc_objs(kvzalloc, default_gfp(__VA_ARGS__), typeof(P), COUNT)
+#define kvzalloc_flex(P, FAM, COUNT, ...) \
+	__alloc_flex(kvzalloc, default_gfp(__VA_ARGS__), typeof(P), FAM, COUNT)
 
 #define kmem_buckets_alloc(_b, _size, _flags)	\
 	alloc_hooks(__kmalloc_node_noprof(PASS_BUCKET_PARAMS(_size, _b), _flags, NUMA_NO_NODE))
