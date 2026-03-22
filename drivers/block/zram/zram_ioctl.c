@@ -187,7 +187,7 @@ static int zram_ioctl_process_writeback(struct zram *zram,
 	if (!capable(CAP_SYS_NICE))
 		return -EPERM;
 
-	guard(rwsem_read)(&zram->init_lock);
+	guard(rwsem_read)(&zram->dev_lock);
 	if (!init_done(zram))
 		return -EINVAL;
 

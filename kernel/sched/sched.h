@@ -2767,6 +2767,17 @@ static inline const struct sched_class *next_active_class(const struct sched_cla
 
 #define sched_class_above(_a, _b)	((_a) < (_b))
 
+static inline void rq_modified_begin(struct rq *rq, const struct sched_class *class)
+{
+	if (sched_class_above(rq->next_class, class))
+		rq->next_class = class;
+}
+
+static inline bool rq_modified_above(struct rq *rq, const struct sched_class *class)
+{
+	return sched_class_above(rq->next_class, class);
+}
+
 static inline bool sched_stop_runnable(struct rq *rq)
 {
 	return rq->stop && task_on_rq_queued(rq->stop);
@@ -3833,8 +3844,10 @@ static __always_inline void mm_unset_cid_on_task(struct task_struct *t)
 static __always_inline void mm_drop_cid_on_cpu(struct mm_struct *mm, struct mm_cid_pcpu *pcp)
 {
 	/* Clear the ONCPU bit, but do not set UNSET in the per CPU storage */
-	pcp->cid = cpu_cid_to_cid(pcp->cid);
-	mm_drop_cid(mm, pcp->cid);
+	if (cid_on_cpu(pcp->cid)) {
+		pcp->cid = cpu_cid_to_cid(pcp->cid);
+		mm_drop_cid(mm, pcp->cid);
+	}
 }
 
 static inline unsigned int __mm_get_cid(struct mm_struct *mm, unsigned int max_cids)

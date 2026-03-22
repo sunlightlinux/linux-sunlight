@@ -300,7 +300,7 @@ static int idletimer_tg_create(struct idletimer_tg_info *info)
 {
 	int ret;
 
-	info->timer = kzalloc(sizeof(*info->timer), GFP_KERNEL);
+	info->timer = kzalloc_obj(*info->timer);
 	if (!info->timer) {
 		ret = -ENOMEM;
 		goto out;
@@ -366,7 +366,7 @@ static int idletimer_tg_create_v1(struct idletimer_tg_info_v1 *info)
 {
 	int ret;
 
-	info->timer = kzalloc(sizeof(*info->timer), GFP_KERNEL);
+	info->timer = kmalloc_obj(*info->timer);
 	if (!info->timer) {
 		ret = -ENOMEM;
 		goto out;
@@ -569,6 +569,12 @@ static int idletimer_tg_checkentry(const struct xt_tgchk_param *par)
 
 	info->timer = __idletimer_tg_find_by_label(info->label);
 	if (info->timer) {
+		if (info->timer->timer_type & XT_IDLETIMER_ALARM) {
+			pr_debug("Adding/Replacing rule with same label and different timer type is not allowed\n");
+			mutex_unlock(&list_mutex);
+			return -EINVAL;
+		}
+
 		info->timer->refcnt++;
 		reset_timer(info->timer, info->timeout, NULL);
 		pr_debug("increased refcnt of timer %s to %u\n",
