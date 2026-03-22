@@ -274,8 +274,13 @@ void dcn35_init_hw(struct dc *dc)
 	}
 
 	/* Power on DIO memory (AFMT HDMI) and optionally disable I2C light sleep */
-	if (dc->res_pool->dio && dc->res_pool->dio->funcs->mem_pwr_ctrl)
+	if (dc->res_pool->dio && dc->res_pool->dio->funcs->mem_pwr_ctrl) {
 		dc->res_pool->dio->funcs->mem_pwr_ctrl(dc->res_pool->dio, !dc->debug.enable_mem_low_power.bits.i2c);
+	} else {
+		REG_WRITE(DIO_MEM_PWR_CTRL, 0);
+		if (dc->debug.enable_mem_low_power.bits.i2c)
+			REG_UPDATE(DIO_MEM_PWR_CTRL, I2C_LIGHT_SLEEP_FORCE, 0);
+	}
 
 	if (hws->funcs.setup_hpo_hw_control)
 		hws->funcs.setup_hpo_hw_control(hws, false);

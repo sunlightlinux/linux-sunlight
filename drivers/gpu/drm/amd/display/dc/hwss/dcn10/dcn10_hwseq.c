@@ -1881,9 +1881,12 @@ void dcn10_init_hw(struct dc *dc)
 		abm->dmcu_is_running = dmcu->funcs->is_dmcu_initialized(dmcu);
 
 	/* power AFMT HDMI memory TODO: may move to dis/en output save power*/
-	if (!is_optimized_init_done)
+	if (!is_optimized_init_done) {
 		if (dc->res_pool->dio && dc->res_pool->dio->funcs->mem_pwr_ctrl)
 			dc->res_pool->dio->funcs->mem_pwr_ctrl(dc->res_pool->dio, false);
+		else
+			REG_WRITE(DIO_MEM_PWR_CTRL, 0);
+	}
 
 	if (!dc->debug.disable_clock_gate) {
 		/* enable all DCN clock gating */
