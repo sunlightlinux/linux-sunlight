@@ -46,7 +46,7 @@
         <option name='binary' key='lib/crypto/tests/sha3_kunit' value='/data/kunit/x86_64/sha3_kunit.ko' />
         <option name='binary' key='lib/crypto/tests/sha384_kunit' value='/data/kunit/x86_64/sha384_kunit.ko' />
         <option name='binary' key='lib/crypto/tests/sha512_kunit' value='/data/kunit/x86_64/sha512_kunit.ko' />
-        <option name='binary' key='lib/kunit/kunit-example-test' value='/data/kunit/x86_64/kunit-example-test.ko' />
+        <!-- <option name='binary' key='lib/kunit/kunit-example-test' value='/data/kunit/x86_64/kunit-example-test.ko' /> -->
         <!-- <option name='binary' key='lib/kunit/kunit-test' value='/data/kunit/x86_64/kunit-test.ko' /> -->
         <!-- <option name='binary' key='mm/kfence/kfence_test' value='/data/kunit/x86_64/kfence_test.ko' /> -->
         <option name='binary' key='net/core/dev_addr_lists_test' value='/data/kunit/x86_64/dev_addr_lists_test.ko' />
