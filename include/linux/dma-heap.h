@@ -107,4 +107,7 @@ void dma_heap_buffer_free(struct dma_buf *);
 int dma_heap_bufferfd_alloc(struct dma_heap *heap, size_t len,
 			    u32 fd_flags,
 			    u64 heap_flags);
+
+extern bool mem_accounting;
+
 #endif /* _DMA_HEAPS_H */

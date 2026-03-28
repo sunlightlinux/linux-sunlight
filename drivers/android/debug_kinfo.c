@@ -31,9 +31,6 @@ extern const u8 kallsyms_seqs_of_names[] __weak;
 extern const unsigned int kallsyms_num_syms __weak
 __section(".rodata");
 
-extern const unsigned long kallsyms_relative_base __weak
-__section(".rodata");
-
 extern const u8 kallsyms_token_table[] __weak;
 extern const u16 kallsyms_token_index[] __weak;
 
@@ -140,7 +137,6 @@ static int debug_kinfo_probe(struct platform_device *pdev)
 	info->bit_per_long = BITS_PER_LONG;
 	info->module_name_len = MODULE_NAME_LEN;
 	info->symbol_len = KSYM_SYMBOL_LEN;
-	info->_relative_pa = (u64)__pa_symbol((volatile void *)kallsyms_relative_base);
 	info->_offsets_pa = (u64)__pa_symbol((volatile void *)kallsyms_offsets);
 	info->_text_pa = (u64)__pa_symbol(_text);
 	info->_stext_pa = (u64)__pa_symbol(_stext);

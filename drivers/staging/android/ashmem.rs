@@ -81,7 +81,7 @@ fn shrinker_should_stop() -> bool {
 
 module! {
     type: AshmemModule,
-    name: "ashmem",
+    name: "ashmem_rust",
     authors: ["Alice Ryhl"],
     description: "Anonymous Shared Memory Subsystem",
     license: "GPL",
@@ -175,7 +175,7 @@ impl MiscDevice for Ashmem {
         }
 
         // Requested mapping size larger than object size.
-        if vma.end() - vma.start() > page_align(asma.size) {
+        if vma.end() - vma.start() > page_align(asma.size).ok_or(EINVAL)? {
             return Err(EINVAL);
         }
 
@@ -425,7 +425,7 @@ impl Ashmem {
             None => return Err(EINVAL),
         };
 
-        let max_size = page_align(asma.size);
+        let max_size = page_align(asma.size).ok_or(EINVAL)?;
         let remaining = max_size.checked_sub(offset).ok_or(EINVAL)?;
 
         // Per custom, you can pass zero for len to mean "everything onward".

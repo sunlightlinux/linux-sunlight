@@ -36,7 +36,6 @@
 #include <trace/hooks/timer.h>
 #include <trace/hooks/ufshcd.h>
 #include <trace/hooks/vmscan.h>
-#include <trace/hooks/wqlockup.h>
 /* keep-sorted end */
 
 /*
@@ -94,5 +93,4 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_ufs_send_command);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_ufs_send_tm_command);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_ufs_send_uic_command);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_ufs_update_sysfs);
-EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_wq_lockup_pool);
 /* keep-sorted end */

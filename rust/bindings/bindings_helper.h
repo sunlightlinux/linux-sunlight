@@ -155,7 +155,7 @@ const vm_flags_t RUST_CONST_HELPER_VM_NOHUGEPAGE = VM_NOHUGEPAGE;
 #include "../../drivers/android/binder/page_range_helper.h"
 #endif
 
-#ifdef CONFIG_ASHMEM
+#ifdef CONFIG_ASHMEM_RUST
 #include "../../drivers/staging/android/ashmem.h"
 const size_t RUST_CONST_HELPER_ASHMEM_NAME_PREFIX_LEN = ASHMEM_NAME_PREFIX_LEN;
 const size_t RUST_CONST_HELPER_ASHMEM_FULL_NAME_LEN = ASHMEM_FULL_NAME_LEN;
