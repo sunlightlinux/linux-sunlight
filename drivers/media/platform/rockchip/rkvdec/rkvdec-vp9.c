@@ -893,7 +893,8 @@ out_update_last:
 	update_ctx_last_info(vp9_ctx);
 }
 
-static void rkvdec_init_v4l2_vp9_count_tbl(struct rkvdec_ctx *ctx)
+static noinline_for_stack void
+rkvdec_init_v4l2_vp9_count_tbl(struct rkvdec_ctx *ctx)
 {
 	struct rkvdec_vp9_ctx *vp9_ctx = ctx->priv;
 	struct rkvdec_vp9_intra_frame_symbol_counts *intra_cnts = vp9_ctx->count_tbl.cpu;
@@ -971,7 +972,7 @@ static int rkvdec_vp9_start(struct rkvdec_ctx *ctx)
 	unsigned char *count_tbl;
 	int ret;
 
-	vp9_ctx = kzalloc(sizeof(*vp9_ctx), GFP_KERNEL);
+	vp9_ctx = kzalloc_obj(*vp9_ctx);
 	if (!vp9_ctx)
 		return -ENOMEM;
 

@@ -88,7 +88,7 @@ static int zram_process_walker(pmd_t *pmd, unsigned long start,
 		 *   a slot for writeback.
 		 * - zram_writeback_slots() performs a double-check of this
 		 *   flag just before writing.
-		 * 3. zram->pp_in_progress also ensures the ZRAM_PP_SLOT flag
+		 * 3. The dev_lock (write) also ensures the ZRAM_PP_SLOT flag
 		 *    won't be set again since we don't allow concurrent
 		 *    post-processing.
 		 *
@@ -187,22 +187,16 @@ static int zram_ioctl_process_writeback(struct zram *zram,
 	if (!capable(CAP_SYS_NICE))
 		return -EPERM;
 
-	guard(rwsem_read)(&zram->init_lock);
+	guard(rwsem_write)(&zram->dev_lock);
 	if (!init_done(zram))
 		return -EINVAL;
 
 	if (!zram->backing_dev)
 		return -ENODEV;
 
-	/* Do not permit concurrent post-processing actions. */
-	if (atomic_xchg(&zram->pp_in_progress, 1))
-		return -EAGAIN;
-
 	pp_ctl = init_pp_ctl();
-	if (!pp_ctl) {
-		ret = -ENOMEM;
-		goto clear_pp_in_progress;
-	}
+	if (!pp_ctl)
+		return -ENOMEM;
 
 	wb_ctl = init_wb_ctl(zram);
 	if (!wb_ctl) {
@@ -219,8 +213,6 @@ static int zram_ioctl_process_writeback(struct zram *zram,
 	release_wb_ctl(wb_ctl);
 clear_pp_ctl:
 	release_pp_ctl(zram, pp_ctl);
-clear_pp_in_progress:
-	atomic_set(&zram->pp_in_progress, 0);
 
 	return ret;
 }

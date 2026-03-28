@@ -4,6 +4,7 @@
  */
 #include <linux/crc32.h>
 #include <linux/file.h>
+#include <linux/hex.h>
 #include <linux/fsverity.h>
 #include <linux/gfp.h>
 #include <linux/kobject.h>

@@ -496,8 +496,10 @@ gmbus_xfer_read_chunk(struct intel_display *display,
 
 		val = intel_de_read_fw(display, GMBUS3(display));
 		do {
-			if (extra_byte_added && len == 1)
+			if (extra_byte_added && len == 1) {
+				len--;
 				break;
+			}
 
 			*buf++ = val & 0xff;
 			val >>= 8;
@@ -925,7 +927,7 @@ int intel_gmbus_setup(struct intel_display *display)
 		if (!gmbus_pin)
 			continue;
 
-		bus = kzalloc(sizeof(*bus), GFP_KERNEL);
+		bus = kzalloc_obj(*bus);
 		if (!bus) {
 			ret = -ENOMEM;
 			goto err;

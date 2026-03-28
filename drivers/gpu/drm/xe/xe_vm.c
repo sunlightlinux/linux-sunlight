@@ -586,9 +586,9 @@ static int xe_vma_ops_alloc(struct xe_vma_ops *vops, bool array_of_binds)
 			continue;
 
 		vops->pt_update_ops[i].ops =
-			kmalloc_array(vops->pt_update_ops[i].num_ops,
-				      sizeof(*vops->pt_update_ops[i].ops),
-				      GFP_KERNEL | __GFP_RETRY_MAYFAIL | __GFP_NOWARN);
+			kmalloc_objs(*vops->pt_update_ops[i].ops,
+				     vops->pt_update_ops[i].num_ops,
+				     GFP_KERNEL | __GFP_RETRY_MAYFAIL | __GFP_NOWARN);
 		if (!vops->pt_update_ops[i].ops)
 			return array_of_binds ? -ENOBUFS : -ENOMEM;
 	}
@@ -667,7 +667,7 @@ static int xe_vm_ops_add_rebind(struct xe_vma_ops *vops, struct xe_vma *vma,
 {
 	struct xe_vma_op *op;
 
-	op = kzalloc(sizeof(*op), GFP_KERNEL);
+	op = kzalloc_obj(*op);
 	if (!op)
 		return -ENOMEM;
 
@@ -803,7 +803,7 @@ xe_vm_ops_add_range_rebind(struct xe_vma_ops *vops,
 {
 	struct xe_vma_op *op;
 
-	op = kzalloc(sizeof(*op), GFP_KERNEL);
+	op = kzalloc_obj(*op);
 	if (!op)
 		return -ENOMEM;
 
@@ -889,7 +889,7 @@ xe_vm_ops_add_range_unbind(struct xe_vma_ops *vops,
 {
 	struct xe_vma_op *op;
 
-	op = kzalloc(sizeof(*op), GFP_KERNEL);
+	op = kzalloc_obj(*op);
 	if (!op)
 		return -ENOMEM;
 
@@ -1008,14 +1008,14 @@ static struct xe_vma *xe_vma_create(struct xe_vm *vm,
 	 * matches what was allocated.
 	 */
 	if (!bo && !is_null && !is_cpu_addr_mirror) {
-		struct xe_userptr_vma *uvma = kzalloc(sizeof(*uvma), GFP_KERNEL);
+		struct xe_userptr_vma *uvma = kzalloc_obj(*uvma);
 
 		if (!uvma)
 			return ERR_PTR(-ENOMEM);
 
 		vma = &uvma->vma;
 	} else {
-		vma = kzalloc(sizeof(*vma), GFP_KERNEL);
+		vma = kzalloc_obj(*vma);
 		if (!vma)
 			return ERR_PTR(-ENOMEM);
 
@@ -1235,7 +1235,7 @@ static struct drm_gpuva_op *xe_vm_op_alloc(void)
 {
 	struct xe_vma_op *op;
 
-	op = kzalloc(sizeof(*op), GFP_KERNEL);
+	op = kzalloc_obj(*op);
 
 	if (unlikely(!op))
 		return NULL;
@@ -2554,7 +2554,6 @@ static int xe_vma_op_commit(struct xe_vm *vm, struct xe_vma_op *op)
 			if (!err && op->remap.skip_prev) {
 				op->remap.prev->tile_present =
 					tile_present;
-				op->remap.prev = NULL;
 			}
 		}
 		if (op->remap.next) {
@@ -2564,11 +2563,13 @@ static int xe_vma_op_commit(struct xe_vm *vm, struct xe_vma_op *op)
 			if (!err && op->remap.skip_next) {
 				op->remap.next->tile_present =
 					tile_present;
-				op->remap.next = NULL;
 			}
 		}
 
-		/* Adjust for partial unbind after removing VMA from VM */
+		/*
+		 * Adjust for partial unbind after removing VMA from VM. In case
+		 * of unwind we might need to undo this later.
+		 */
 		if (!err) {
 			op->base.remap.unmap->va->va.addr = op->remap.start;
 			op->base.remap.unmap->va->va.range = op->remap.range;
@@ -2687,6 +2688,8 @@ static int vm_bind_ioctl_ops_parse(struct xe_vm *vm, struct drm_gpuva_ops *ops,
 
 			op->remap.start = xe_vma_start(old);
 			op->remap.range = xe_vma_size(old);
+			op->remap.old_start = op->remap.start;
+			op->remap.old_range = op->remap.range;
 
 			flags |= op->base.remap.unmap->va->flags & XE_VMA_CREATE_MASK;
 			if (op->base.remap.prev) {
@@ -2835,8 +2838,19 @@ static void xe_vma_op_unwind(struct xe_vm *vm, struct xe_vma_op *op,
 			xe_svm_notifier_lock(vm);
 			vma->gpuva.flags &= ~XE_VMA_DESTROYED;
 			xe_svm_notifier_unlock(vm);
-			if (post_commit)
+			if (post_commit) {
+				/*
+				 * Restore the old va range, in case of the
+				 * prev/next skip optimisation. Otherwise what
+				 * we re-insert here could be smaller than the
+				 * original range.
+				 */
+				op->base.remap.unmap->va->va.addr =
+					op->remap.old_start;
+				op->base.remap.unmap->va->va.range =
+					op->remap.old_range;
 				xe_vm_insert_vma(vm, vma);
+			}
 		}
 		break;
 	}
@@ -3161,7 +3175,7 @@ static struct dma_fence *ops_execute(struct xe_vm *vm,
 				++n_fence;
 	}
 
-	fences = kmalloc_array(n_fence, sizeof(*fences), GFP_KERNEL);
+	fences = kmalloc_objs(*fences, n_fence);
 	if (!fences) {
 		fence = ERR_PTR(-ENOMEM);
 		goto err_trace;
@@ -3373,10 +3387,9 @@ static int vm_bind_ioctl_check_args(struct xe_device *xe, struct xe_vm *vm,
 		u64 __user *bind_user =
 			u64_to_user_ptr(args->vector_of_binds);
 
-		*bind_ops = kvmalloc_array(args->num_binds,
-					   sizeof(struct drm_xe_vm_bind_op),
-					   GFP_KERNEL | __GFP_ACCOUNT |
-					   __GFP_RETRY_MAYFAIL | __GFP_NOWARN);
+		*bind_ops = kvmalloc_objs(struct drm_xe_vm_bind_op,
+					  args->num_binds,
+					  GFP_KERNEL | __GFP_ACCOUNT | __GFP_RETRY_MAYFAIL | __GFP_NOWARN);
 		if (!*bind_ops)
 			return args->num_binds > 1 ? -ENOBUFS : -ENOMEM;
 
@@ -3663,17 +3676,15 @@ int xe_vm_bind_ioctl(struct drm_device *dev, void *data, struct drm_file *file)
 	}
 
 	if (args->num_binds) {
-		bos = kvcalloc(args->num_binds, sizeof(*bos),
-			       GFP_KERNEL | __GFP_ACCOUNT |
-			       __GFP_RETRY_MAYFAIL | __GFP_NOWARN);
+		bos = kvzalloc_objs(*bos, args->num_binds,
+				    GFP_KERNEL | __GFP_ACCOUNT | __GFP_RETRY_MAYFAIL | __GFP_NOWARN);
 		if (!bos) {
 			err = -ENOMEM;
 			goto release_vm_lock;
 		}
 
-		ops = kvcalloc(args->num_binds, sizeof(*ops),
-			       GFP_KERNEL | __GFP_ACCOUNT |
-			       __GFP_RETRY_MAYFAIL | __GFP_NOWARN);
+		ops = kvzalloc_objs(*ops, args->num_binds,
+				    GFP_KERNEL | __GFP_ACCOUNT | __GFP_RETRY_MAYFAIL | __GFP_NOWARN);
 		if (!ops) {
 			err = -ENOMEM;
 			goto free_bos;
@@ -3708,7 +3719,7 @@ int xe_vm_bind_ioctl(struct drm_device *dev, void *data, struct drm_file *file)
 	}
 
 	if (args->num_syncs) {
-		syncs = kcalloc(args->num_syncs, sizeof(*syncs), GFP_KERNEL);
+		syncs = kzalloc_objs(*syncs, args->num_syncs);
 		if (!syncs) {
 			err = -ENOMEM;
 			goto put_obj;

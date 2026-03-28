@@ -323,8 +323,8 @@ static int erofs_init_percpu_workers(void)
 	struct kthread_worker *worker;
 	unsigned int cpu;
 
-	z_erofs_pcpu_workers = kcalloc(num_possible_cpus(),
-			sizeof(struct kthread_worker *), GFP_ATOMIC);
+	z_erofs_pcpu_workers = kzalloc_objs(struct kthread_worker *,
+					    num_possible_cpus(), GFP_ATOMIC);
 	if (!z_erofs_pcpu_workers)
 		return -ENOMEM;
 
@@ -1144,7 +1144,7 @@ static void z_erofs_do_decompressed_bvec(struct z_erofs_backend *be,
 	}
 
 	/* (cold path) one pcluster is requested multiple times */
-	item = kmalloc(sizeof(*item), GFP_KERNEL | __GFP_NOFAIL);
+	item = kmalloc_obj(*item, GFP_KERNEL | __GFP_NOFAIL);
 	item->bvec = *bvec;
 	list_add(&item->list, &be->decompressed_secondary_bvecs);
 }
@@ -1282,12 +1282,12 @@ static int z_erofs_decompress_pcluster(struct z_erofs_backend *be, bool eio)
 
 	if (!be->decompressed_pages)
 		be->decompressed_pages =
-			kvcalloc(be->nr_pages, sizeof(struct page *),
-				 GFP_KERNEL | __GFP_NOFAIL);
+			kvzalloc_objs(struct page *, be->nr_pages,
+				      GFP_KERNEL | __GFP_NOFAIL);
 	if (!be->compressed_pages)
 		be->compressed_pages =
-			kvcalloc(pclusterpages, sizeof(struct page *),
-				 GFP_KERNEL | __GFP_NOFAIL);
+			kvzalloc_objs(struct page *, pclusterpages,
+				      GFP_KERNEL | __GFP_NOFAIL);
 
 	z_erofs_parse_out_bvecs(be);
 	err2 = z_erofs_parse_in_bvecs(be, &overlapped);
@@ -1445,6 +1445,7 @@ static void z_erofs_decompress_kickoff(struct z_erofs_decompressqueue *io,
 				       int bios)
 {
 	struct erofs_sb_info *const sbi = EROFS_SB(io->sb);
+	int gfp_flag;
 
 	/* wake up the caller thread for sync decompression */
 	if (io->sync) {
@@ -1477,7 +1478,9 @@ static void z_erofs_decompress_kickoff(struct z_erofs_decompressqueue *io,
 			sbi->sync_decompress = EROFS_SYNC_DECOMPRESS_FORCE_ON;
 		return;
 	}
+	gfp_flag = memalloc_noio_save();
 	z_erofs_decompressqueue_work(&io->u.work);
+	memalloc_noio_restore(gfp_flag);
 }
 
 static void z_erofs_fill_bio_vec(struct bio_vec *bvec,
@@ -1590,7 +1593,7 @@ static struct z_erofs_decompressqueue *jobqueue_init(struct super_block *sb,
 	struct z_erofs_decompressqueue *q;
 
 	if (fg && !*fg) {
-		q = kvzalloc(sizeof(*q), GFP_KERNEL | __GFP_NOWARN);
+		q = kvzalloc_obj(*q, GFP_KERNEL | __GFP_NOWARN);
 		if (!q) {
 			*fg = true;
 			goto fg_out;

@@ -1196,7 +1196,7 @@ static struct xfrm_state * pfkey_msg2xfrm_state(struct net *net,
 				err = -ENOSYS;
 				goto out;
 			}
-			x->calg = kmalloc(sizeof(*x->calg), GFP_KERNEL);
+			x->calg = kmalloc_obj(*x->calg);
 			if (!x->calg) {
 				err = -ENOMEM;
 				goto out;
@@ -1261,7 +1261,7 @@ static struct xfrm_state * pfkey_msg2xfrm_state(struct net *net,
 		const struct sadb_x_nat_t_type* n_type;
 		struct xfrm_encap_tmpl *natt;
 
-		x->encap = kzalloc(sizeof(*x->encap), GFP_KERNEL);
+		x->encap = kzalloc_obj(*x->encap);
 		if (!x->encap) {
 			err = -ENOMEM;
 			goto out;
@@ -1855,7 +1855,7 @@ static int pfkey_dump(struct sock *sk, struct sk_buff *skb, const struct sadb_ms
 			mutex_unlock(&pfk->dump_lock);
 			return -EINVAL;
 		}
-		filter = kmalloc(sizeof(*filter), GFP_KERNEL);
+		filter = kmalloc_obj(*filter);
 		if (filter == NULL) {
 			mutex_unlock(&pfk->dump_lock);
 			return -ENOMEM;
@@ -3518,7 +3518,7 @@ static int set_sadb_kmaddress(struct sk_buff *skb, const struct xfrm_kmaddress *
 
 static int set_ipsecrequest(struct sk_buff *skb,
 			    uint8_t proto, uint8_t mode, int level,
-			    uint32_t reqid, uint8_t family,
+			    uint32_t reqid, sa_family_t family,
 			    const xfrm_address_t *src, const xfrm_address_t *dst)
 {
 	struct sadb_x_ipsecrequest *rq;
@@ -3583,12 +3583,17 @@ static int pfkey_send_migrate(const struct xfrm_selector *sel, u8 dir, u8 type,
 
 	/* ipsecrequests */
 	for (i = 0, mp = m; i < num_bundles; i++, mp++) {
-		/* old locator pair */
-		size_pol += sizeof(struct sadb_x_ipsecrequest) +
-			    pfkey_sockaddr_pair_size(mp->old_family);
-		/* new locator pair */
-		size_pol += sizeof(struct sadb_x_ipsecrequest) +
-			    pfkey_sockaddr_pair_size(mp->new_family);
+		int pair_size;
+
+		pair_size = pfkey_sockaddr_pair_size(mp->old_family);
+		if (!pair_size)
+			return -EINVAL;
+		size_pol += sizeof(struct sadb_x_ipsecrequest) + pair_size;
+
+		pair_size = pfkey_sockaddr_pair_size(mp->new_family);
+		if (!pair_size)
+			return -EINVAL;
+		size_pol += sizeof(struct sadb_x_ipsecrequest) + pair_size;
 	}
 
 	size += sizeof(struct sadb_msg) + size_pol;

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0
-VERSION = 6
-PATCHLEVEL = 19
+VERSION = 7
+PATCHLEVEL = 0
 SUBLEVEL = 0
-EXTRAVERSION =
+EXTRAVERSION = -rc5
 NAME = Baby Opossum Posse
 
 # *DOCUMENTATION*
@@ -494,6 +494,7 @@ KBUILD_USERLDFLAGS := $(USERLDFLAGS)
 export rust_common_flags := --edition=2021 \
 			    -Zbinary_dep_depinfo=y \
 			    -Astable_features \
+			    -Aunused_features \
 			    -Dnon_ascii_idents \
 			    -Dunsafe_op_in_unsafe_fn \
 			    -Wmissing_docs \
@@ -1139,6 +1140,9 @@ KBUILD_CFLAGS += -fno-builtin-wcslen
 # change __FILE__ to the relative path to the source directory
 ifdef building_out_of_srctree
 KBUILD_CPPFLAGS += -fmacro-prefix-map=$(srcroot)/=
+ifeq ($(call rustc-option-yn, --remap-path-scope=macro),y)
+KBUILD_RUSTFLAGS += --remap-path-prefix=$(srcroot)/= --remap-path-scope=macro
+endif
 endif
 
 # include additional Makefiles when needed
@@ -1525,6 +1529,15 @@ ifneq ($(wildcard $(resolve_btfids_O)),)
 	$(Q)$(MAKE) -sC $(srctree)/tools/bpf/resolve_btfids O=$(resolve_btfids_O) clean
 endif
 
+PHONY += objtool_clean objtool_mrproper
+
+objtool_O = $(abspath $(objtree))/tools/objtool
+
+objtool_clean objtool_mrproper:
+ifneq ($(wildcard $(objtool_O)),)
+	$(Q)$(MAKE) -sC $(abs_srctree)/tools/objtool O=$(objtool_O) srctree=$(abs_srctree) $(patsubst objtool_%,%,$@)
+endif
+
 tools/: FORCE
 	$(Q)mkdir -p $(objtree)/tools
 	$(Q)$(MAKE) O=$(abspath $(objtree)) subdir=tools -C $(srctree)/tools/
@@ -1559,6 +1572,12 @@ ifneq ($(wildcard $(srctree)/arch/$(SRCARCH)/boot/dts/),)
 dtstree ?= arch/$(SRCARCH)/boot/dts
 endif
 
+dtbindingtree := Documentation/devicetree/bindings
+
+%.yaml: dtbs_prepare
+	$(Q)$(MAKE) $(build)=$(dtbindingtree) \
+		    $(dtbindingtree)/$(patsubst %.yaml,%.example.dtb,$@) dt_binding_check_one
+
 ifneq ($(dtstree),)
 
 %.dtb: dtbs_prepare
@@ -1576,7 +1595,7 @@ dtbs: dtbs_prepare
 # dtbs_install depend on it as dtbs_install may run as root.
 dtbs_prepare: include/config/kernel.release scripts_dtc
 
-ifneq ($(filter dtbs_check, $(MAKECMDGOALS)),)
+ifneq ($(filter dtbs_check %.yaml, $(MAKECMDGOALS)),)
 export CHECK_DTBS=y
 endif
 
@@ -1609,14 +1628,14 @@ endif
 
 PHONY += dt_binding_check dt_binding_schemas
 dt_binding_check: dt_binding_schemas scripts_dtc
-	$(Q)$(MAKE) $(build)=Documentation/devicetree/bindings $@
+	$(Q)$(MAKE) $(build)=$(dtbindingtree) $@
 
 dt_binding_schemas:
-	$(Q)$(MAKE) $(build)=Documentation/devicetree/bindings
+	$(Q)$(MAKE) $(build)=$(dtbindingtree)
 
 PHONY += dt_compatible_check
 dt_compatible_check: dt_binding_schemas
-	$(Q)$(MAKE) $(build)=Documentation/devicetree/bindings $@
+	$(Q)$(MAKE) $(build)=$(dtbindingtree) $@
 
 # ---------------------------------------------------------------------------
 # Modules
@@ -1665,7 +1684,7 @@ CLEAN_FILES += vmlinux.symvers modules-only.symvers \
 	       modules.builtin.ranges vmlinux.o.map vmlinux.unstripped \
 	       compile_commands.json rust/test \
 	       rust-project.json .vmlinux.objs .vmlinux.export.c \
-               .builtin-dtbs-list .builtin-dtb.S
+               .builtin-dtbs-list .builtin-dtbs.S
 
 # Directories & files removed with 'make mrproper'
 MRPROPER_FILES += include/config include/generated          \
@@ -1690,7 +1709,7 @@ vmlinuxclean:
 	$(Q)$(CONFIG_SHELL) $(srctree)/scripts/link-vmlinux.sh clean
 	$(Q)$(if $(ARCH_POSTLINK), $(MAKE) -f $(ARCH_POSTLINK) clean)
 
-clean: archclean vmlinuxclean resolve_btfids_clean
+clean: archclean vmlinuxclean resolve_btfids_clean objtool_clean
 
 # mrproper - Delete all generated files, including .config
 #
@@ -1701,7 +1720,7 @@ PHONY += $(mrproper-dirs) mrproper
 $(mrproper-dirs):
 	$(Q)$(MAKE) $(clean)=$(patsubst _mrproper_%,%,$@)
 
-mrproper: clean $(mrproper-dirs)
+mrproper: clean objtool_mrproper $(mrproper-dirs)
 	$(call cmd,rmfiles)
 	@find . $(RCS_FIND_IGNORE) \
 		\( -name '*.rmeta' \) \

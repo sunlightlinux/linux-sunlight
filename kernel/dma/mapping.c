@@ -164,6 +164,9 @@ dma_addr_t dma_map_phys(struct device *dev, phys_addr_t phys, size_t size,
 	if (WARN_ON_ONCE(!dev->dma_mask))
 		return DMA_MAPPING_ERROR;
 
+	if (!dev_is_dma_coherent(dev) && (attrs & DMA_ATTR_REQUIRE_COHERENT))
+		return DMA_MAPPING_ERROR;
+
 	if (dma_map_direct(dev, ops) ||
 	    (!is_mmio && arch_dma_map_phys_direct(dev, phys + size)))
 		addr = dma_direct_map_phys(dev, phys, size, dir, attrs);
@@ -234,6 +237,9 @@ static int __dma_map_sg_attrs(struct device *dev, struct scatterlist *sg,
 	int ents;
 
 	BUG_ON(!valid_dma_direction(dir));
+
+	if (!dev_is_dma_coherent(dev) && (attrs & DMA_ATTR_REQUIRE_COHERENT))
+		return -EOPNOTSUPP;
 
 	if (WARN_ON_ONCE(!dev->dma_mask))
 		return 0;
@@ -768,7 +774,7 @@ static struct sg_table *alloc_single_sgt(struct device *dev, size_t size,
 	struct sg_table *sgt;
 	struct page *page;
 
-	sgt = kmalloc(sizeof(*sgt), gfp);
+	sgt = kmalloc_obj(*sgt, gfp);
 	if (!sgt)
 		return NULL;
 	if (sg_alloc_table(sgt, 1, gfp))

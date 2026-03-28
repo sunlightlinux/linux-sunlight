@@ -682,8 +682,7 @@ static int uvc_video_clock_init(struct uvc_clock *clock)
 	spin_lock_init(&clock->lock);
 	clock->size = 32;
 
-	clock->samples = kmalloc_array(clock->size, sizeof(*clock->samples),
-				       GFP_KERNEL);
+	clock->samples = kmalloc_objs(*clock->samples, clock->size);
 	if (clock->samples == NULL)
 		return -ENOMEM;
 
@@ -1752,7 +1751,8 @@ static void uvc_video_complete(struct urb *urb)
 /*
  * Free transfer buffers.
  */
-static void uvc_free_urb_buffers(struct uvc_streaming *stream)
+static void uvc_free_urb_buffers(struct uvc_streaming *stream,
+				 unsigned int size)
 {
 	struct usb_device *udev = stream->dev->udev;
 	struct uvc_urb *uvc_urb;
@@ -1761,7 +1761,7 @@ static void uvc_free_urb_buffers(struct uvc_streaming *stream)
 		if (!uvc_urb->buffer)
 			continue;
 
-		usb_free_noncoherent(udev, stream->urb_size, uvc_urb->buffer,
+		usb_free_noncoherent(udev, size, uvc_urb->buffer,
 				     uvc_stream_dir(stream), uvc_urb->sgt);
 		uvc_urb->buffer = NULL;
 		uvc_urb->sgt = NULL;
@@ -1821,7 +1821,7 @@ static int uvc_alloc_urb_buffers(struct uvc_streaming *stream,
 
 			if (!uvc_alloc_urb_buffer(stream, uvc_urb, urb_size,
 						  gfp_flags)) {
-				uvc_free_urb_buffers(stream);
+				uvc_free_urb_buffers(stream, urb_size);
 				break;
 			}
 
@@ -1869,7 +1869,7 @@ static void uvc_video_stop_transfer(struct uvc_streaming *stream,
 	}
 
 	if (free_buffers)
-		uvc_free_urb_buffers(stream);
+		uvc_free_urb_buffers(stream, stream->urb_size);
 }
 
 /*

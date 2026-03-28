@@ -395,7 +395,10 @@ static void mmhub_v4_2_0_mid_enable_system_domain(struct amdgpu_device *adev,
 		tmp = REG_SET_FIELD(tmp, MMVM_CONTEXT0_CNTL,
 				    ENABLE_CONTEXT, 1);
 		tmp = REG_SET_FIELD(tmp, MMVM_CONTEXT0_CNTL,
-				    PAGE_TABLE_DEPTH, 0);
+				    PAGE_TABLE_DEPTH, adev->gmc.vmid0_page_table_depth);
+		tmp = REG_SET_FIELD(tmp, MMVM_CONTEXT0_CNTL,
+				    PAGE_TABLE_BLOCK_SIZE,
+				    adev->gmc.vmid0_page_table_block_size);
 		tmp = REG_SET_FIELD(tmp, MMVM_CONTEXT0_CNTL,
 				    RETRY_PERMISSION_OR_INVALID_PAGE_FAULT, 0);
 		WREG32_SOC15(MMHUB, GET_INST(MMHUB, i),
@@ -685,7 +688,8 @@ mmhub_v4_2_0_print_l2_protection_fault_status(struct amdgpu_device *adev,
 		status);
 	switch (amdgpu_ip_version(adev, MMHUB_HWIP, 0)) {
 	case IP_VERSION(4, 2, 0):
-		mmhub_cid = mmhub_client_ids_v4_2_0[cid][rw];
+		mmhub_cid = cid < ARRAY_SIZE(mmhub_client_ids_v4_2_0) ?
+			mmhub_client_ids_v4_2_0[cid][rw] : NULL;
 		break;
 	default:
 		mmhub_cid = NULL;

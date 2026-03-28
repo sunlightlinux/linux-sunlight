@@ -1008,6 +1008,7 @@ static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
 #ifdef CONFIG_SCHED_MM_CID
 	tsk->mm_cid.cid = MM_CID_UNSET;
 	tsk->mm_cid.active = 0;
+	INIT_HLIST_NODE(&tsk->mm_cid.node);
 #endif
 	android_init_vendor_data(tsk, 1);
 	android_init_oem_data(tsk, 1);
@@ -1369,7 +1370,7 @@ struct file *get_task_exe_file(struct task_struct *task)
  * @task: The task.
  *
  * Returns %NULL if the task has no mm.  Checks PF_KTHREAD (meaning
- * this kernel workthread has transiently adopted a user mm with use_mm,
+ * this kernel workthread has transiently adopted a user mm with kthread_use_mm,
  * to do its AIO) is not set and if so returns a reference to it, after
  * bumping up the use count.  User must release the mm via mmput()
  * after use.  Typically used by /proc and ptrace.
@@ -1599,7 +1600,6 @@ static int copy_mm(u64 clone_flags, struct task_struct *tsk)
 
 	tsk->mm = mm;
 	tsk->active_mm = mm;
-	sched_mm_cid_fork(tsk);
 	return 0;
 }
 
@@ -2084,7 +2084,7 @@ __latent_entropy struct task_struct *copy_process(
 
 	p->set_child_tid = (clone_flags & CLONE_CHILD_SETTID) ? args->child_tid : NULL;
 	/*
-	 * Clear TID on mm_release()?
+	 * TID is cleared in mm_release() when the task exits
 	 */
 	p->clear_child_tid = (clone_flags & CLONE_CHILD_CLEARTID) ? args->child_tid : NULL;
 
@@ -2513,7 +2513,6 @@ bad_fork_cleanup_namespaces:
 	exit_nsproxy_namespaces(p);
 bad_fork_cleanup_mm:
 	if (p->mm) {
-		sched_mm_cid_exit(p);
 		mm_clear_owner(p->mm, p);
 		mmput(p->mm);
 	}
@@ -3102,7 +3101,7 @@ static int unshare_fs(unsigned long unshare_flags, struct fs_struct **new_fsp)
 		return 0;
 
 	/* don't need lock here; in the worst case we'll do useless copy */
-	if (fs->users == 1)
+	if (!(unshare_flags & CLONE_NEWNS) && fs->users == 1)
 		return 0;
 
 	*new_fsp = copy_fs_struct(fs);
