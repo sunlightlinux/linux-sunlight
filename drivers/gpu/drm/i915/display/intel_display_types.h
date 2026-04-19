@@ -34,6 +34,7 @@
 #include <drm/display/drm_dp_tunnel.h>
 #include <drm/display/drm_dsc.h>
 #include <drm/drm_atomic.h>
+#include <drm/drm_colorop.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_encoder.h>
 #include <drm/drm_framebuffer.h>
@@ -1159,6 +1160,7 @@ struct intel_crtc_state {
 	u32 dc3co_exitline;
 	u16 su_y_granularity;
 	u8 active_non_psr_pipes;
+	u8 entry_setup_frames;
 	const char *no_psr_reason;
 
 	/*

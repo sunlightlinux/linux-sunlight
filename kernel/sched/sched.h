@@ -686,8 +686,8 @@ struct cfs_rq {
 	unsigned int		h_nr_runnable;     /* SCHED_{NORMAL,BATCH,IDLE} */
 	unsigned int		h_nr_idle; /* SCHED_IDLE */
 
-	s64			avg_vruntime;
-	u64			avg_load;
+	s64			sum_w_vruntime;
+	u64			sum_weight;
 
 	u64			zero_vruntime;
 #ifdef CONFIG_SCHED_CORE
@@ -811,9 +811,12 @@ struct scx_rq {
 	cpumask_var_t		cpus_to_kick_if_idle;
 	cpumask_var_t		cpus_to_preempt;
 	cpumask_var_t		cpus_to_wait;
+	cpumask_var_t		cpus_to_sync;
+	bool			kick_sync_pending;
 	unsigned long		kick_sync;
 	local_t			reenq_local_deferred;
 	struct balance_callback	deferred_bal_cb;
+	struct balance_callback	kick_sync_bal_cb;
 	struct irq_work		deferred_irq_work;
 	struct irq_work		kick_cpus_irq_work;
 	struct scx_dispatch_q	bypass_dsq;
@@ -3778,8 +3781,10 @@ static __always_inline void mm_unset_cid_on_task(struct task_struct *t)
 static __always_inline void mm_drop_cid_on_cpu(struct mm_struct *mm, struct mm_cid_pcpu *pcp)
 {
 	/* Clear the ONCPU bit, but do not set UNSET in the per CPU storage */
-	pcp->cid = cpu_cid_to_cid(pcp->cid);
-	mm_drop_cid(mm, pcp->cid);
+	if (cid_on_cpu(pcp->cid)) {
+		pcp->cid = cpu_cid_to_cid(pcp->cid);
+		mm_drop_cid(mm, pcp->cid);
+	}
 }
 
 static inline unsigned int __mm_get_cid(struct mm_struct *mm, unsigned int max_cids)

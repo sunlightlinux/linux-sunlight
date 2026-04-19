@@ -1583,6 +1583,7 @@ struct ext4_sb_info {
 	struct proc_dir_entry *s_proc;
 	struct kobject s_kobj;
 	struct completion s_kobj_unregister;
+	struct mutex s_error_notify_mutex; /* protects sysfs_notify vs kobject_del */
 	struct super_block *s_sb;
 	struct buffer_head *s_mmp_bh;
 
@@ -1795,6 +1796,10 @@ struct ext4_sb_info {
 	 * Main fast commit lock. This lock protects accesses to the
 	 * following fields:
 	 * ei->i_fc_list, s_fc_dentry_q, s_fc_q, s_fc_bytes, s_fc_bh.
+	 *
+	 * s_fc_lock can be taken from reclaim context (inode eviction) and is
+	 * thus reclaim unsafe. Use ext4_fc_lock()/ext4_fc_unlock() helpers
+	 * when acquiring / releasing the lock.
 	 */
 	struct mutex s_fc_lock;
 	struct buffer_head *s_fc_bh;
@@ -1837,6 +1842,18 @@ static inline void ext4_writepages_up_write(struct super_block *sb, int ctx)
 {
 	memalloc_nofs_restore(ctx);
 	percpu_up_write(&EXT4_SB(sb)->s_writepages_rwsem);
+}
+
+static inline int ext4_fc_lock(struct super_block *sb)
+{
+	mutex_lock(&EXT4_SB(sb)->s_fc_lock);
+	return memalloc_nofs_save();
+}
+
+static inline void ext4_fc_unlock(struct super_block *sb, int ctx)
+{
+	memalloc_nofs_restore(ctx);
+	mutex_unlock(&EXT4_SB(sb)->s_fc_lock);
 }
 
 static inline int ext4_valid_inum(struct super_block *sb, unsigned long ino)
@@ -3936,6 +3953,11 @@ static inline bool ext4_inode_can_atomic_write(struct inode *inode)
 extern int ext4_block_write_begin(handle_t *handle, struct folio *folio,
 				  loff_t pos, unsigned len,
 				  get_block_t *get_block);
+
+#if IS_ENABLED(CONFIG_EXT4_KUNIT_TESTS)
+#define EXPORT_SYMBOL_FOR_EXT4_TEST(sym) \
+	EXPORT_SYMBOL_FOR_MODULES(sym, "ext4-test")
+#endif
 #endif	/* __KERNEL__ */
 
 #define EFSBADCRC	EBADMSG		/* Bad CRC detected */

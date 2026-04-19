@@ -198,10 +198,11 @@ static void wb_queue_work(struct bdi_writeback *wb,
 
 static bool wb_wait_for_completion_cb(struct wb_completion *done)
 {
+	unsigned long timeout = sysctl_hung_task_timeout_secs;
 	unsigned long waited_secs = (jiffies - done->wait_start) / HZ;
 
 	done->progress_stamp = jiffies;
-	if (waited_secs > sysctl_hung_task_timeout_secs)
+	if (timeout && (waited_secs > timeout))
 		pr_info("INFO: The task %s:%d has been waiting for writeback "
 			"completion for more than %lu seconds.",
 			current->comm, current->pid, waited_secs);
@@ -1944,6 +1945,7 @@ static long writeback_sb_inodes(struct super_block *sb,
 		.range_end		= LLONG_MAX,
 	};
 	unsigned long start_time = jiffies;
+	unsigned long timeout = sysctl_hung_task_timeout_secs;
 	long write_chunk;
 	long total_wrote = 0;  /* count both pages and inodes */
 	unsigned long dirtied_before = jiffies;
@@ -2030,9 +2032,8 @@ static long writeback_sb_inodes(struct super_block *sb,
 		__writeback_single_inode(inode, &wbc);
 
 		/* Report progress to inform the hung task detector of the progress. */
-		if (work->done && work->done->progress_stamp &&
-		   (jiffies - work->done->progress_stamp) > HZ *
-		   sysctl_hung_task_timeout_secs / 2)
+		if (work->done && work->done->progress_stamp && timeout &&
+		   (jiffies - work->done->progress_stamp) > HZ * timeout / 2)
 			wake_up_all(work->done->waitq);
 
 		wbc_detach_inode(&wbc);
@@ -2758,13 +2759,8 @@ static void wait_sb_inodes(struct super_block *sb)
 		 * The mapping can appear untagged while still on-list since we
 		 * do not have the mapping lock. Skip it here, wb completion
 		 * will remove it.
-		 *
-		 * If the mapping does not have data integrity semantics,
-		 * there's no need to wait for the writeout to complete, as the
-		 * mapping cannot guarantee that data is persistently stored.
 		 */
-		if (!mapping_tagged(mapping, PAGECACHE_TAG_WRITEBACK) ||
-		    mapping_no_data_integrity(mapping))
+		if (!mapping_tagged(mapping, PAGECACHE_TAG_WRITEBACK))
 			continue;
 
 		spin_unlock_irq(&sb->s_inode_wblist_lock);
@@ -2899,6 +2895,17 @@ void sync_inodes_sb(struct super_block *sb)
 	 */
 	if (bdi == &noop_backing_dev_info)
 		return;
+
+	/*
+	 * If the superblock has SB_I_NO_DATA_INTEGRITY set, there's no need to
+	 * wait for the writeout to complete, as the filesystem cannot guarantee
+	 * data persistence on sync. Just kick off writeback and return.
+	 */
+	if (sb->s_iflags & SB_I_NO_DATA_INTEGRITY) {
+		wakeup_flusher_threads_bdi(bdi, WB_REASON_SYNC);
+		return;
+	}
+
 	WARN_ON(!rwsem_is_locked(&sb->s_umount));
 
 	/* protect against inode wb switch, see inode_switch_wbs_work_fn() */

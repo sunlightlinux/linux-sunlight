@@ -412,18 +412,23 @@ static ssize_t cs_dsp_debugfs_string_read(struct cs_dsp *dsp,
 					  size_t count, loff_t *ppos,
 					  const char **pstr)
 {
-	const char *str __free(kfree) = NULL;
+	const char *str;
+	ssize_t ret = 0;
 
 	scoped_guard(mutex, &dsp->pwr_lock) {
-		if (!*pstr)
-			return 0;
-
-		str = kasprintf(GFP_KERNEL, "%s\n", *pstr);
-		if (!str)
-			return -ENOMEM;
-
-		return simple_read_from_buffer(user_buf, count, ppos, str, strlen(str));
+		if (*pstr) {
+			str = kasprintf(GFP_KERNEL, "%s\n", *pstr);
+			if (str) {
+				ret = simple_read_from_buffer(user_buf, count,
+							      ppos, str, strlen(str));
+				kfree(str);
+			} else {
+				ret = -ENOMEM;
+			}
+		}
 	}
+
+	return ret;
 }
 
 static ssize_t cs_dsp_debugfs_wmfw_read(struct file *file,
@@ -1483,7 +1488,7 @@ static int cs_dsp_load(struct cs_dsp *dsp, const struct firmware *firmware,
 	const struct wmfw_region *region;
 	const struct cs_dsp_region *mem;
 	const char *region_name;
-	u8 *buf __free(kfree) = NULL;
+	u8 *buf = NULL;
 	size_t buf_len = 0;
 	size_t region_len;
 	unsigned int reg;
@@ -1605,11 +1610,17 @@ static int cs_dsp_load(struct cs_dsp *dsp, const struct firmware *firmware,
 			   region_name);
 
 		if (reg) {
+			/*
+			 * Although we expect the underlying bus does not require
+			 * physically-contiguous buffers, we pessimistically use
+			 * a temporary buffer instead of trusting that the
+			 * alignment of region->data is ok.
+			 */
 			region_len = le32_to_cpu(region->len);
 			if (region_len > buf_len) {
 				buf_len = round_up(region_len, PAGE_SIZE);
-				kfree(buf);
-				buf = kmalloc(buf_len, GFP_KERNEL | GFP_DMA);
+				vfree(buf);
+				buf = vmalloc(buf_len);
 				if (!buf) {
 					ret = -ENOMEM;
 					goto out_fw;
@@ -1638,6 +1649,8 @@ static int cs_dsp_load(struct cs_dsp *dsp, const struct firmware *firmware,
 
 	ret = 0;
 out_fw:
+	vfree(buf);
+
 	if (ret == -EOVERFLOW)
 		cs_dsp_err(dsp, "%s: file content overflows file data\n", file);
 
@@ -2169,7 +2182,7 @@ static int cs_dsp_load_coeff(struct cs_dsp *dsp, const struct firmware *firmware
 	struct cs_dsp_alg_region *alg_region;
 	const char *region_name;
 	int ret, pos, blocks, type, offset, reg, version;
-	u8 *buf __free(kfree) = NULL;
+	u8 *buf = NULL;
 	size_t buf_len = 0;
 	size_t region_len;
 
@@ -2313,11 +2326,17 @@ static int cs_dsp_load_coeff(struct cs_dsp *dsp, const struct firmware *firmware
 		}
 
 		if (reg) {
+			/*
+			 * Although we expect the underlying bus does not require
+			 * physically-contiguous buffers, we pessimistically use
+			 * a temporary buffer instead of trusting that the
+			 * alignment of blk->data is ok.
+			 */
 			region_len = le32_to_cpu(blk->len);
 			if (region_len > buf_len) {
 				buf_len = round_up(region_len, PAGE_SIZE);
-				kfree(buf);
-				buf = kmalloc(buf_len, GFP_KERNEL | GFP_DMA);
+				vfree(buf);
+				buf = vmalloc(buf_len);
 				if (!buf) {
 					ret = -ENOMEM;
 					goto out_fw;
@@ -2348,6 +2367,8 @@ static int cs_dsp_load_coeff(struct cs_dsp *dsp, const struct firmware *firmware
 
 	ret = 0;
 out_fw:
+	vfree(buf);
+
 	if (ret == -EOVERFLOW)
 		cs_dsp_err(dsp, "%s: file content overflows file data\n", file);
 

@@ -2703,8 +2703,12 @@ static int amdgpu_pmops_freeze(struct device *dev)
 	if (r)
 		return r;
 
-	if (amdgpu_acpi_should_gpu_reset(adev))
-		return amdgpu_asic_reset(adev);
+	if (amdgpu_acpi_should_gpu_reset(adev)) {
+		amdgpu_device_lock_reset_domain(adev->reset_domain);
+		r = amdgpu_asic_reset(adev);
+		amdgpu_device_unlock_reset_domain(adev->reset_domain);
+		return r;
+	}
 	return 0;
 }
 
@@ -3172,7 +3176,6 @@ static int __init amdgpu_init(void)
 	if (r)
 		goto error_fence;
 
-	DRM_INFO("amdgpu kernel modesetting enabled.\n");
 	amdgpu_register_atpx_handler();
 	amdgpu_acpi_detect();
 
