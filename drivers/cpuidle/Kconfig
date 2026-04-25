@@ -60,6 +60,38 @@ config CPU_IDLE_GOV_ADAPTIVE
 	  and desktop systems. Say Y here if you want adaptive performance/power
 	  balance.
 
+choice
+	prompt "Adaptive governor profile"
+	depends on CPU_IDLE_GOV_ADAPTIVE
+	default CPU_IDLE_GOV_ADAPTIVE_DESKTOP
+	help
+	  Profile for the adaptive governor's workload-multiplier formula.
+	  This selects defaults that bias the governor for either consumer
+	  workloads (low latency floor, light protection against deep states)
+	  or latency-critical server workloads (higher latency floor, stronger
+	  protection against deep C-states under network/IO load).
+
+config CPU_IDLE_GOV_ADAPTIVE_DESKTOP
+	bool "Desktop / laptop"
+	help
+	  Tuned for consumer workloads where the typical idle window is long
+	  and brief responsiveness blips are acceptable in exchange for
+	  better power savings. Sets BASE_MULTIPLIER=1 (Menu-TNG default)
+	  and a moderate network factor of 10.
+
+config CPU_IDLE_GOV_ADAPTIVE_SERVER
+	bool "Server / latency-critical"
+	help
+	  Tuned for servers that care about tail latency under bursty
+	  network or IO load (DPDK, RDMA, NVMe-oF, RPC tier). Raises
+	  BASE_MULTIPLIER to 5 so even idle CPUs keep a small floor of
+	  latency awareness, and bumps the network factor to 30 so packet
+	  bursts visibly inhibit deep states. Pair with the SMT-sibling
+	  cap (always on) for predictable wakeup latency on hyperthreaded
+	  CPUs.
+
+endchoice
+
 config DT_IDLE_STATES
 	bool
 
