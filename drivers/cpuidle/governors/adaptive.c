@@ -44,6 +44,7 @@
 #include <linux/workqueue.h>
 #include <linux/percpu.h>
 #include <linux/mutex.h>
+#include <linux/topology.h>
 
 #include "gov.h"
 
@@ -101,8 +102,19 @@
 #define MAX_IDLE_DURATION_US		(30000000UL)
 #define FALLBACK_EMA_SHIFT		5
 
-/* Performance multiplier constants (Menu-TNG compatible) */
-#define BASE_MULTIPLIER			1	/* 1x - neutral (Menu-TNG style) */
+/*
+ * Performance multiplier constants (Menu-TNG compatible).
+ *
+ * BASE_MULTIPLIER sets the floor for the multiplier formula. A higher value
+ * means even an apparently-idle CPU keeps a small barrier against deep
+ * C-states, which trades a bit of power for predictable wakeup latency.
+ * Picked by Kconfig profile (1 = desktop, 5 = server).
+ */
+#ifdef CONFIG_CPU_IDLE_GOV_ADAPTIVE_SERVER
+#define BASE_MULTIPLIER			5
+#else
+#define BASE_MULTIPLIER			1	/* Menu-TNG default */
+#endif
 #define MIN_MULTIPLIER			1	/* 1x - minimum barrier */
 #define MAX_MULTIPLIER			200	/* 200x - maximum barrier for very busy systems */
 
@@ -113,9 +125,21 @@
  * These are applied directly without division, matching Menu-TNG behavior.
  */
 
-/* Network activity factor (scaled for Menu-TNG range) */
+/*
+ * Network activity factor (scaled for Menu-TNG range).
+ *
+ * On servers running DPDK / RDMA / NVMe-oF / RPC tiers, packet processing
+ * dominates the latency profile but a single softirq burst is dwarfed by
+ * load+io contributions in the multiplier formula. The server profile
+ * triples the heavy factor so a sustained packet burst meaningfully
+ * inhibits deep C-states.
+ */
 #define NET_FACTOR_MODERATE		5	/* >5 softirqs/10ms */
-#define NET_FACTOR_HEAVY		10	/* >20 softirqs/10ms */
+#ifdef CONFIG_CPU_IDLE_GOV_ADAPTIVE_SERVER
+#define NET_FACTOR_HEAVY		30
+#else
+#define NET_FACTOR_HEAVY		10
+#endif
 
 /* Battery boost (scaled for Menu-TNG range) */
 #define BATTERY_BOOST			20	/* Negative adjustment for battery mode */
@@ -761,6 +785,39 @@ static void adaptive_update_multiplier(struct adaptive_device *data)
 	data->performance_multiplier = (u32)multiplier;
 }
 
+/**
+ * adaptive_sibling_busy - check if any SMT sibling of @cpu is non-idle
+ * @cpu: CPU we are about to put into idle
+ *
+ * On SMT-capable processors (Intel HT, AMD SMT) the deeper package
+ * C-states (typically C6 and below) require all logical CPUs of a
+ * physical core to be idle. If a sibling is running work, entering a
+ * deep state on this thread:
+ *   - does not save package power (the package state is gated by the
+ *     busiest sibling),
+ *   - still costs the full entry/exit latency on wake.
+ * Returns true if at least one sibling other than @cpu has nr_running > 0.
+ *
+ * Returns false if SMT is disabled, the system has no sibling topology,
+ * or all siblings are idle.
+ */
+static bool adaptive_sibling_busy(int cpu)
+{
+	const struct cpumask *siblings = topology_sibling_cpumask(cpu);
+	int sib;
+
+	if (!siblings || cpumask_weight(siblings) <= 1)
+		return false;
+
+	for_each_cpu(sib, siblings) {
+		if (sib == cpu)
+			continue;
+		if (READ_ONCE(cpu_rq(sib)->nr_running) > 0)
+			return true;
+	}
+	return false;
+}
+
 /*
  * ============================================================================
  * STATE SELECTION LOGIC
@@ -967,7 +1024,15 @@ static int adaptive_select(struct cpuidle_driver *drv,
 	 * - Menu-TNG prevents deep states on BUSY workloads (high multiplier)
 	 * - This promotes deep states on IDLE scenarios (low multiplier passed)
 	 */
-	if (idx <= 1 && drv->state_count > 2) {
+	/*
+	 * Skip the deep-state promotion entirely when an SMT sibling is
+	 * still doing work. Deep states (typically C2 and below) require
+	 * all logical CPUs of the physical core to be idle to actually
+	 * drop the package state, so promoting here would only buy us the
+	 * exit-latency penalty.
+	 */
+	if (idx <= 1 && drv->state_count > 2 &&
+	    !adaptive_sibling_busy(dev->cpu)) {
 		/* Currently selected POLL or C1 - try to promote */
 		if (predicted_ns > PROMOTION_IDLE_THRESHOLD_NS &&
 		    latency_req >= PROMOTION_LATENCY_THRESHOLD_NS) {
@@ -1003,6 +1068,16 @@ static int adaptive_select(struct cpuidle_driver *drv,
 			}
 		}
 	}
+
+	/*
+	 * Post-selection SMT cap. Even if the main loop chose a deep state on
+	 * its own merits (e.g. high predicted residency), an active SMT
+	 * sibling means the package state cannot drop, so the deeper exit
+	 * latency is wasted. Demote to idx 1 (typically C1) which is a
+	 * thread-local state and not gated by sibling activity.
+	 */
+	if (idx >= 2 && adaptive_sibling_busy(dev->cpu))
+		idx = !dev->states_usage[1].disable ? 1 : 0;
 
 	/*
 	 * ENHANCED TICK STOP DECISION (from Mobile governor)
