@@ -43,6 +43,7 @@
 #include <linux/kernel_stat.h>
 #include <linux/workqueue.h>
 #include <linux/percpu.h>
+#include <linux/mutex.h>
 
 #include "gov.h"
 
@@ -121,6 +122,15 @@
 
 /* Deep C-state boost from Mobile governor (optional) */
 #define DEEP_CSTATE_BOOST_PERCENT	20	/* Add 20% to idle prediction for deep states */
+
+/*
+ * Extra boost applied to predicted_ns on battery. The multiplier-side
+ * BATTERY_BOOST helps busy systems (multiplier - 20), but on a fully idle
+ * CPU the multiplier is already clamped to 1 so the subtraction is wasted.
+ * Inflating predicted_ns instead lets the target_residency check accept
+ * deeper C-states even when the CPU has nothing to do.
+ */
+#define BATTERY_PREDICTED_BOOST_PERCENT	25
 
 /* Network activity detection */
 #define NETWORK_CHECK_INTERVAL_NS	(10 * NSEC_PER_MSEC)
@@ -209,8 +219,12 @@ static atomic_t battery_check_active = ATOMIC_INIT(0);
 /**
  * adaptive_users - count of CPUs using this governor
  * Used to start workqueue on first enable, stop on last disable.
+ *
+ * Protected by adaptive_lifecycle_lock during 0↔1 transitions to serialize
+ * workqueue start/stop against concurrent enable/disable from other CPUs.
  */
-static atomic_t adaptive_users = ATOMIC_INIT(0);
+static int adaptive_users;
+static DEFINE_MUTEX(adaptive_lifecycle_lock);
 
 /**
  * adaptive_battery_check_worker - workqueue callback for battery detection
@@ -853,6 +867,15 @@ static int adaptive_select(struct cpuidle_driver *drv,
 	if (predicted_ns > 200 * NSEC_PER_USEC) {
 		/* Boost prediction by 20% for deep C-states (from Mobile) */
 		predicted_ns = (predicted_ns * (100 + DEEP_CSTATE_BOOST_PERCENT)) / 100;
+
+		/*
+		 * Extra battery boost. Stacks on top of the deep-state boost so
+		 * an idle laptop on battery is more willing to enter C6/C7/C8
+		 * even when the typical-interval predictor is shy.
+		 */
+		if (atomic_read(&global_battery_mode))
+			predicted_ns = (predicted_ns *
+					(100 + BATTERY_PREDICTED_BOOST_PERCENT)) / 100;
 	}
 
 	idx = -1;
@@ -1237,7 +1260,7 @@ static int adaptive_enable_device(struct cpuidle_driver *drv,
 				  struct cpuidle_device *dev)
 {
 	struct adaptive_device *data = &per_cpu(adaptive_devices, dev->cpu);
-	int i, prev_users;
+	int i;
 
 	memset(data, 0, sizeof(*data));
 
@@ -1252,15 +1275,25 @@ static int adaptive_enable_device(struct cpuidle_driver *drv,
 	data->performance_multiplier = BASE_MULTIPLIER;
 
 	/*
-	 * Increment user count. If this is the first user (0→1),
-	 * start the battery check workqueue.
+	 * Capture current softirq counters so the first delta is 0 instead
+	 * of the absolute count (would falsely report HEAVY network activity
+	 * for the first 10ms window after enable).
 	 */
-	prev_users = atomic_inc_return(&adaptive_users);
-	if (prev_users == 1) {
-		/* First CPU enabling governor - start workqueue */
+	data->network_activity_rx = kstat_softirqs_cpu(NET_RX_SOFTIRQ, dev->cpu);
+	data->network_activity_tx = kstat_softirqs_cpu(NET_TX_SOFTIRQ, dev->cpu);
+	data->last_workload_check = jiffies;
+
+	/*
+	 * Serialize 0↔1 transition with disable_device. Without the mutex,
+	 * a concurrent disable could race with us and either leak a worker or
+	 * skip starting one because the active flag flickered.
+	 */
+	mutex_lock(&adaptive_lifecycle_lock);
+	if (++adaptive_users == 1) {
 		atomic_set(&battery_check_active, 1);
 		schedule_delayed_work(&battery_check_work, 0);
 	}
+	mutex_unlock(&adaptive_lifecycle_lock);
 
 	return 0;
 }
@@ -1276,26 +1309,19 @@ static int adaptive_enable_device(struct cpuidle_driver *drv,
 static void adaptive_disable_device(struct cpuidle_driver *drv,
 				    struct cpuidle_device *dev)
 {
-	int remaining_users;
-
-	/*
-	 * Decrement user count. If this was the last user (1→0),
-	 * stop the battery check workqueue.
-	 */
-	remaining_users = atomic_dec_return(&adaptive_users);
-	if (remaining_users == 0) {
+	mutex_lock(&adaptive_lifecycle_lock);
+	if (--adaptive_users == 0) {
 		/*
-		 * Last CPU disabling governor - stop workqueue.
-		 *
-		 * Sequence:
-		 * 1. Clear active flag → prevents re-scheduling
-		 * 2. Cancel pending work and wait for completion
+		 * Last CPU disabling governor - stop workqueue. Order matters:
+		 * clear active first so the running worker (if any) sees it and
+		 * skips re-scheduling, then synchronously cancel any pending
+		 * work. The mutex prevents a concurrent enable from racing the
+		 * cancel.
 		 */
 		atomic_set(&battery_check_active, 0);
 		cancel_delayed_work_sync(&battery_check_work);
 	}
-
-	/* Note: per-CPU data cleanup not needed - will be reinitialized on next enable */
+	mutex_unlock(&adaptive_lifecycle_lock);
 }
 
 static struct cpuidle_governor adaptive_governor = {
