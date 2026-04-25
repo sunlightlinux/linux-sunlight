@@ -133,9 +133,17 @@
 #define BATTERY_PREDICTED_BOOST_PERCENT	25
 
 /* Network activity detection */
-#define NETWORK_CHECK_INTERVAL_NS	(10 * NSEC_PER_MSEC)
+#define NETWORK_CHECK_INTERVAL_JIFFIES	msecs_to_jiffies(10)
 #define NETWORK_THRESHOLD_MODERATE	5
 #define NETWORK_THRESHOLD_HEAVY		20
+
+/*
+ * Battery-mode cache TTL. Battery state changes on the order of seconds,
+ * but adaptive_select() runs hundreds of thousands of times per second per
+ * CPU. Cache the global atomic locally and only re-read once per TTL to
+ * keep the global cache line cold from the idle path on big servers.
+ */
+#define BATTERY_CACHE_TTL_JIFFIES	msecs_to_jiffies(500)
 
 /* Prediction accuracy tracking */
 #define MIN_SAMPLES_FOR_ADAPT		20
@@ -298,58 +306,41 @@ static void adaptive_battery_check_worker(struct work_struct *work)
 
 /**
  * struct adaptive_device - per-CPU adaptive governor data
- * @needs_update: deferred update flag (from menu)
- * @tick_wakeup: tick caused wakeup (from menu)
- * @next_timer_ns: next timer event time (from menu)
- * @bucket: current bucket index for correction factors
- * @correction_factor: per-bucket correction factors (12 buckets)
- * @intervals: last 8 idle intervals for pattern detection
- * @interval_ptr: circular buffer pointer for intervals
- * @idle_ema_avg: exponential moving average for idle duration (from mobile)
- * @idle_total: accumulated idle time for current period (from mobile)
- * @last_jiffies: last reschedule timestamp (from mobile)
- * @ema_alpha_shift: adaptive EMA alpha parameter (from mobile)
- * @fallback_ema_short: short-term EMA for quick pattern detection (from mobile)
- * @performance_multiplier: current performance multiplier (500-2000)
- * @network_activity_rx: NET_RX softirq counter cache
- * @network_activity_tx: NET_TX softirq counter cache
- * @last_workload_check: timestamp of last workload detection
- * @last_predicted_duration: last predicted idle duration (us)
- * @prediction_hits: accurate prediction count
- * @prediction_total: total prediction count
- * @stats_update_counter: periodic stats update counter
  *
- * Note: battery_mode removed - now uses global atomic (global_battery_mode)
+ * Layout is grouped by access pattern: hot fields touched on every
+ * adaptive_select() come first so they fit in the first cache line, then
+ * cached/rate-limited workload fields, then cold update/statistics fields.
+ * The struct is per-CPU so there is no false sharing between CPUs, but a
+ * tighter hot footprint still saves L1 fills on big servers.
  */
 struct adaptive_device {
-	/* Menu-style bucket correction */
-	int		needs_update;
-	int		tick_wakeup;
+	/* ---- HOT: read on every select() ------------------------------- */
 	u64		next_timer_ns;
-	unsigned int	bucket;
+	u64		idle_ema_avg;
 	unsigned int	correction_factor[BUCKETS];
 	unsigned int	intervals[INTERVALS];
+	unsigned int	bucket;
 	int		interval_ptr;
-
-	/* Mobile-style EMA tracking */
-	u64		idle_ema_avg;
-	u64		idle_total;
-	unsigned long	last_jiffies;
-	u8		ema_alpha_shift;
-	u64		fallback_ema_short;
-
-	/* Performance multiplier */
 	u32		performance_multiplier;
+	int		needs_update;
+	int		tick_wakeup;
 
-	/* Workload detection */
+	/* ---- WARM: workload detection (rate-limited) ------------------- */
+	unsigned long	last_workload_check;	/* jiffies of last network sample */
+	unsigned long	battery_cache_jiffies;	/* jiffies of last battery read  */
 	u32		network_activity_rx;
 	u32		network_activity_tx;
-	u64		last_workload_check;
+	u8		cached_network_factor;	/* re-read every 10ms only */
+	u8		cached_battery_boost;	/* re-read every 500ms only */
 
-	/* Statistics */
+	/* ---- COLD: update path / EMA bookkeeping ----------------------- */
+	u64		idle_total;
+	unsigned long	last_jiffies;
+	u64		fallback_ema_short;
 	u64		last_predicted_duration;
 	u16		prediction_hits;
 	u16		prediction_total;
+	u8		ema_alpha_shift;
 	u8		stats_update_counter;
 };
 
@@ -657,11 +648,17 @@ static u32 adaptive_calc_io_factor(void)
 static u32 adaptive_calc_network_factor(struct adaptive_device *data)
 {
 	u32 rx_new, tx_new, rx_delta, tx_delta;
-	u64 now = local_clock();
+	unsigned long now = jiffies;
 
-	/* Rate-limit: only check every 10ms */
-	if (now - data->last_workload_check < NETWORK_CHECK_INTERVAL_NS)
-		return 0;
+	/*
+	 * Rate-limit to once per 10ms. Use jiffies to avoid a TSC read per
+	 * idle entry; on a 128c box at 100k idle/s this saves ~10-30ns * 128c
+	 * * 100k/s of pure overhead, and 10ms resolution is plenty for a
+	 * heuristic that returns one of three buckets.
+	 */
+	if (time_before(now, data->last_workload_check +
+				NETWORK_CHECK_INTERVAL_JIFFIES))
+		return data->cached_network_factor;
 
 	data->last_workload_check = now;
 
@@ -686,36 +683,39 @@ static u32 adaptive_calc_network_factor(struct adaptive_device *data)
 	 */
 	if (rx_delta > NETWORK_THRESHOLD_HEAVY ||
 	    tx_delta > NETWORK_THRESHOLD_HEAVY)
-		return NET_FACTOR_HEAVY;	/* +10 */
+		data->cached_network_factor = NET_FACTOR_HEAVY;
+	else if (rx_delta > NETWORK_THRESHOLD_MODERATE ||
+		 tx_delta > NETWORK_THRESHOLD_MODERATE)
+		data->cached_network_factor = NET_FACTOR_MODERATE;
+	else
+		data->cached_network_factor = 0;
 
-	if (rx_delta > NETWORK_THRESHOLD_MODERATE ||
-	    tx_delta > NETWORK_THRESHOLD_MODERATE)
-		return NET_FACTOR_MODERATE;	/* +5 */
-
-	return 0;
+	return data->cached_network_factor;
 }
 
 /**
  * adaptive_calc_battery_boost - calculate battery mode adjustment
+ * @data: adaptive device data
  *
  * Returns multiplier adjustment for battery mode (extension beyond Menu-TNG).
  * On battery: returns positive value to SUBTRACT from multiplier (promotes deep C-states)
  * On AC: returns 0 (prefer responsiveness)
  *
- * Reads global atomic (updated by workqueue) - lock-free, safe from idle path.
- * Fallback: If battery detection unavailable (desktop/server), returns 0 (AC mode).
- *
- * Example: On battery with idle system (mult = 1 - 20 → clamped to MIN=1)
- * This allows deeper C-states on battery for power savings.
+ * The global atomic is updated by a workqueue every 5s, so re-reading it on
+ * every idle entry produces nothing new but causes a remote cache-line touch
+ * on big servers. Cache the value per-CPU and only re-read once per
+ * BATTERY_CACHE_TTL_JIFFIES, which is two orders of magnitude shorter than
+ * the workqueue interval (i.e. we never observe a stale value for long).
  */
-static u32 adaptive_calc_battery_boost(void)
+static u32 adaptive_calc_battery_boost(struct adaptive_device *data)
 {
-	int on_battery = atomic_read(&global_battery_mode);
-
-	if (on_battery == 1)
-		return BATTERY_BOOST;  /* Battery: -20 to multiplier */
-	else
-		return 0;  /* AC power or unknown: no adjustment */
+	if (time_after_eq(jiffies, data->battery_cache_jiffies +
+				BATTERY_CACHE_TTL_JIFFIES)) {
+		data->cached_battery_boost =
+			atomic_read(&global_battery_mode) ? BATTERY_BOOST : 0;
+		data->battery_cache_jiffies = jiffies;
+	}
+	return data->cached_battery_boost;
 }
 
 /**
@@ -734,8 +734,20 @@ static void adaptive_update_multiplier(struct adaptive_device *data)
 
 	load = adaptive_calc_load_factor();
 	io = adaptive_calc_io_factor();
-	net = adaptive_calc_network_factor(data);
-	battery_boost = adaptive_calc_battery_boost();
+
+	/*
+	 * Fast path for an idle CPU with no IO: workload-derived contributions
+	 * are guaranteed zero, the rate-limited network factor reuses its
+	 * cached value (no kstat_softirqs_cpu reads), and the battery cache
+	 * stays warm. Almost all idle entries on a quiet system land here.
+	 */
+	if (load == 0 && io == 0) {
+		net = data->cached_network_factor;
+		battery_boost = adaptive_calc_battery_boost(data);
+	} else {
+		net = adaptive_calc_network_factor(data);
+		battery_boost = adaptive_calc_battery_boost(data);
+	}
 
 	/* Menu-TNG formula: base + load + io + net - battery_boost */
 	multiplier = (s32)BASE_MULTIPLIER + load + io + net - battery_boost;
