@@ -85,10 +85,12 @@ config CPU_IDLE_GOV_ADAPTIVE_SERVER
 	  Tuned for servers that care about tail latency under bursty
 	  network or IO load (DPDK, RDMA, NVMe-oF, RPC tier). Raises
 	  BASE_MULTIPLIER to 5 so even idle CPUs keep a small floor of
-	  latency awareness, and bumps the network factor to 30 so packet
-	  bursts visibly inhibit deep states. Pair with the SMT-sibling
-	  cap (always on) for predictable wakeup latency on hyperthreaded
-	  CPUs.
+	  latency awareness, bumps the network factor to 30 so packet
+	  bursts visibly inhibit deep states, and lifts the residency
+	  correction-factor cap to 500ms so legitimate long idle windows
+	  (overnight-idle hosts, long inter-RPC pauses) are not truncated
+	  to 50ms. Pair with the SMT-sibling cap (always on) for
+	  predictable wakeup latency on hyperthreaded CPUs.
 
 endchoice
 
