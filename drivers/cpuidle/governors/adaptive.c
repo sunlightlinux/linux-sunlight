@@ -45,6 +45,8 @@
 #include <linux/percpu.h>
 #include <linux/mutex.h>
 #include <linux/topology.h>
+#include <linux/kobject.h>
+#include <linux/sysfs.h>
 
 #include "gov.h"
 
@@ -53,6 +55,9 @@
  * This gives us true per-CPU load (Menu-TNG style) instead of global average.
  */
 #include "../../kernel/sched/sched.h"
+
+#define CREATE_TRACE_POINTS
+#include <trace/events/cpuidle_adaptive.h>
 
 /*
  * Concepts behind the ADAPTIVE governor
@@ -122,12 +127,13 @@
  * BASE_MULTIPLIER sets the floor for the multiplier formula. A higher value
  * means even an apparently-idle CPU keeps a small barrier against deep
  * C-states, which trades a bit of power for predictable wakeup latency.
- * Picked by Kconfig profile (1 = desktop, 5 = server).
+ * The compiled-in default is picked by Kconfig profile (1 = desktop,
+ * 5 = server) but the value can be retuned at runtime via sysfs.
  */
 #ifdef CONFIG_CPU_IDLE_GOV_ADAPTIVE_SERVER
-#define BASE_MULTIPLIER			5
+#define ADAPTIVE_BASE_MULTIPLIER_DEFAULT	5
 #else
-#define BASE_MULTIPLIER			1	/* Menu-TNG default */
+#define ADAPTIVE_BASE_MULTIPLIER_DEFAULT	1	/* Menu-TNG default */
 #endif
 #define MIN_MULTIPLIER			1	/* 1x - minimum barrier */
 #define MAX_MULTIPLIER			200	/* 200x - maximum barrier for very busy systems */
@@ -150,10 +156,20 @@
  */
 #define NET_FACTOR_MODERATE		5	/* >5 softirqs/10ms */
 #ifdef CONFIG_CPU_IDLE_GOV_ADAPTIVE_SERVER
-#define NET_FACTOR_HEAVY		30
+#define ADAPTIVE_NET_FACTOR_HEAVY_DEFAULT	30
 #else
-#define NET_FACTOR_HEAVY		10
+#define ADAPTIVE_NET_FACTOR_HEAVY_DEFAULT	10
 #endif
+
+/*
+ * Runtime-tunable knobs (sysfs). Hot-path reads use READ_ONCE so that a
+ * concurrent sysfs write doesn't tear or get fused with a previous load.
+ * Bounded on store side; no need for additional locking.
+ */
+static u32 adaptive_base_multiplier __read_mostly =
+	ADAPTIVE_BASE_MULTIPLIER_DEFAULT;
+static u32 adaptive_net_factor_heavy __read_mostly =
+	ADAPTIVE_NET_FACTOR_HEAVY_DEFAULT;
 
 /* Battery boost (scaled for Menu-TNG range) */
 #define BATTERY_BOOST			20	/* Negative adjustment for battery mode */
@@ -379,6 +395,8 @@ struct adaptive_device {
 	unsigned long	multiplier_jiffies;	/* jiffies of last multiplier compute */
 	u32		network_activity_rx;
 	u32		network_activity_tx;
+	u16		last_load_factor;	/* most recent load contribution (trace) */
+	u16		last_io_factor;		/* most recent IO contribution (trace) */
 	u8		cached_network_factor;	/* re-read every 10ms only */
 	u8		cached_battery_boost;	/* re-read every 500ms only */
 	u8		multiplier_quiet;	/* 1 if last compute saw load=io=0 */
@@ -733,7 +751,9 @@ static u32 adaptive_calc_network_factor(struct adaptive_device *data)
 	 */
 	if (rx_delta > NETWORK_THRESHOLD_HEAVY ||
 	    tx_delta > NETWORK_THRESHOLD_HEAVY)
-		data->cached_network_factor = NET_FACTOR_HEAVY;
+		data->cached_network_factor =
+			(u8)min_t(u32, READ_ONCE(adaptive_net_factor_heavy),
+				  U8_MAX);
 	else if (rx_delta > NETWORK_THRESHOLD_MODERATE ||
 		 tx_delta > NETWORK_THRESHOLD_MODERATE)
 		data->cached_network_factor = NET_FACTOR_MODERATE;
@@ -818,9 +838,12 @@ static void adaptive_update_multiplier(struct adaptive_device *data)
 	}
 
 	data->multiplier_jiffies = now;
+	data->last_load_factor = (u16)min_t(u32, load, U16_MAX);
+	data->last_io_factor = (u16)min_t(u32, io, U16_MAX);
 
 	/* Menu-TNG formula: base + load + io + net - battery_boost */
-	multiplier = (s32)BASE_MULTIPLIER + load + io + net - battery_boost;
+	multiplier = (s32)READ_ONCE(adaptive_base_multiplier) +
+		     load + io + net - battery_boost;
 
 	/* Clamp to safe range [1, 200] */
 	if (multiplier < MIN_MULTIPLIER)
@@ -904,10 +927,10 @@ static int adaptive_select(struct cpuidle_driver *drv,
 	multiplier = data->performance_multiplier;
 
 	/*
-	 * Compute the SMT-sibling-busy flag once and reuse it for both the
-	 * promotion gate and the post-cap demotion. adaptive_sibling_busy()
-	 * walks the sibling cpumask, so caching the result avoids redundant
-	 * cpumask reads on hot SMT systems.
+	 * Compute the SMT-sibling-busy flag once and reuse it for the
+	 * promotion gate, the post-cap demotion, and the trace event below.
+	 * adaptive_sibling_busy() walks the sibling cpumask, so caching its
+	 * result avoids redundant cpumask reads on hot SMT systems.
 	 */
 	sibling_busy = adaptive_sibling_busy(dev->cpu);
 
@@ -1236,6 +1259,14 @@ static int adaptive_select(struct cpuidle_driver *drv,
 		*stop_tick = false;
 	}
 
+	trace_cpuidle_adaptive_select(dev->cpu, idx, predicted_ns, latency_req,
+				      multiplier,
+				      data->last_load_factor,
+				      data->last_io_factor,
+				      data->cached_network_factor,
+				      data->cached_battery_boost,
+				      sibling_busy);
+
 	return idx;
 }
 
@@ -1407,6 +1438,19 @@ static void adaptive_update(struct cpuidle_driver *drv,
 			}
 		}
 	}
+
+	if (trace_cpuidle_adaptive_update_enabled()) {
+		u32 accuracy_pct = 0;
+
+		if (data->prediction_total)
+			accuracy_pct = (data->prediction_hits * 100U) /
+				       data->prediction_total;
+
+		trace_cpuidle_adaptive_update(dev->cpu, last_idx, residency_us,
+					      data->last_predicted_duration,
+					      accuracy_pct,
+					      data->performance_multiplier);
+	}
 }
 
 /*
@@ -1440,8 +1484,8 @@ static int adaptive_enable_device(struct cpuidle_driver *drv,
 	/* Initialize EMA parameters (from mobile) */
 	data->ema_alpha_shift = EMA_ALPHA_SHIFT_DEFAULT;
 
-	/* Initialize performance multiplier */
-	data->performance_multiplier = BASE_MULTIPLIER;
+	/* Initialize performance multiplier from current sysfs-tunable base */
+	data->performance_multiplier = READ_ONCE(adaptive_base_multiplier);
 
 	/*
 	 * Capture current softirq counters so the first delta is 0 instead
@@ -1493,6 +1537,164 @@ static void adaptive_disable_device(struct cpuidle_driver *drv,
 	mutex_unlock(&adaptive_lifecycle_lock);
 }
 
+/*
+ * ============================================================================
+ * SYSFS INTERFACE
+ * ============================================================================
+ *
+ * Lives at /sys/kernel/cpuidle_adaptive/.
+ *
+ *   prediction_accuracy  - RO, % hit-rate against the ±25% window, averaged
+ *                          across all CPUs that have ≥ MIN_SAMPLES_FOR_ADAPT
+ *                          observations. "n/a" before any CPU has enough
+ *                          samples.
+ *   avg_multiplier       - RO, current performance multiplier averaged across
+ *                          online CPUs. Useful for spotting "we're stuck at
+ *                          a high multiplier" pathologies.
+ *   battery_mode         - RO, 0 = AC / unknown, 1 = on battery.
+ *   base_multiplier      - RW, [1, MAX_MULTIPLIER]. Floor of the multiplier
+ *                          formula. 1 = consumer/desktop, 5 = server-style
+ *                          latency floor. Live-tunable without reboot.
+ *   net_factor_heavy     - RW, [0, 200]. Contribution added to the multiplier
+ *                          when sustained packet bursts are detected. Bump
+ *                          for DPDK / RDMA / RPC-tier deployments.
+ */
+
+static struct kobject *adaptive_kobj;
+
+static ssize_t prediction_accuracy_show(struct kobject *kobj,
+					struct kobj_attribute *attr, char *buf)
+{
+	u64 hits = 0, total = 0;
+	int cpu;
+
+	for_each_online_cpu(cpu) {
+		struct adaptive_device *d = &per_cpu(adaptive_devices, cpu);
+
+		if (d->prediction_total >= MIN_SAMPLES_FOR_ADAPT) {
+			hits += d->prediction_hits;
+			total += d->prediction_total;
+		}
+	}
+
+	if (!total)
+		return sysfs_emit(buf, "n/a\n");
+
+	return sysfs_emit(buf, "%llu\n", (hits * 100ULL) / total);
+}
+
+static ssize_t avg_multiplier_show(struct kobject *kobj,
+				   struct kobj_attribute *attr, char *buf)
+{
+	u64 sum = 0;
+	unsigned int n = 0;
+	int cpu;
+
+	for_each_online_cpu(cpu) {
+		sum += per_cpu(adaptive_devices, cpu).performance_multiplier;
+		n++;
+	}
+
+	if (!n)
+		return sysfs_emit(buf, "0\n");
+
+	return sysfs_emit(buf, "%llu\n", div_u64(sum, n));
+}
+
+static ssize_t battery_mode_show(struct kobject *kobj,
+				 struct kobj_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%d\n", atomic_read(&global_battery_mode));
+}
+
+static ssize_t base_multiplier_show(struct kobject *kobj,
+				    struct kobj_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%u\n", READ_ONCE(adaptive_base_multiplier));
+}
+
+static ssize_t base_multiplier_store(struct kobject *kobj,
+				     struct kobj_attribute *attr,
+				     const char *buf, size_t count)
+{
+	unsigned int v;
+	int ret;
+
+	ret = kstrtouint(buf, 0, &v);
+	if (ret)
+		return ret;
+	if (v < MIN_MULTIPLIER || v > MAX_MULTIPLIER)
+		return -EINVAL;
+
+	WRITE_ONCE(adaptive_base_multiplier, v);
+	return count;
+}
+
+static ssize_t net_factor_heavy_show(struct kobject *kobj,
+				     struct kobj_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%u\n", READ_ONCE(adaptive_net_factor_heavy));
+}
+
+static ssize_t net_factor_heavy_store(struct kobject *kobj,
+				      struct kobj_attribute *attr,
+				      const char *buf, size_t count)
+{
+	unsigned int v;
+	int ret;
+
+	ret = kstrtouint(buf, 0, &v);
+	if (ret)
+		return ret;
+	if (v > 200)
+		return -EINVAL;
+
+	WRITE_ONCE(adaptive_net_factor_heavy, v);
+	return count;
+}
+
+static struct kobj_attribute prediction_accuracy_attr =
+	__ATTR_RO(prediction_accuracy);
+static struct kobj_attribute avg_multiplier_attr =
+	__ATTR_RO(avg_multiplier);
+static struct kobj_attribute battery_mode_attr =
+	__ATTR_RO(battery_mode);
+static struct kobj_attribute base_multiplier_attr =
+	__ATTR_RW(base_multiplier);
+static struct kobj_attribute net_factor_heavy_attr =
+	__ATTR_RW(net_factor_heavy);
+
+static struct attribute *adaptive_attrs[] = {
+	&prediction_accuracy_attr.attr,
+	&avg_multiplier_attr.attr,
+	&battery_mode_attr.attr,
+	&base_multiplier_attr.attr,
+	&net_factor_heavy_attr.attr,
+	NULL,
+};
+
+static const struct attribute_group adaptive_attr_group = {
+	.attrs = adaptive_attrs,
+};
+
+static void adaptive_sysfs_init(void)
+{
+	int ret;
+
+	adaptive_kobj = kobject_create_and_add("cpuidle_adaptive", kernel_kobj);
+	if (!adaptive_kobj) {
+		pr_warn("adaptive: failed to create sysfs kobject\n");
+		return;
+	}
+
+	ret = sysfs_create_group(adaptive_kobj, &adaptive_attr_group);
+	if (ret) {
+		pr_warn("adaptive: failed to create sysfs group: %d\n", ret);
+		kobject_put(adaptive_kobj);
+		adaptive_kobj = NULL;
+	}
+}
+
 static struct cpuidle_governor adaptive_governor = {
 	.name		= "adaptive",
 	.rating		= ADAPTIVE_RATING,
@@ -1512,6 +1714,8 @@ static struct cpuidle_governor adaptive_governor = {
  */
 static int __init adaptive_governor_init(void)
 {
+	int ret;
+
 	/*
 	 * Initialize battery detection workqueue (but don't start it).
 	 * The workqueue will be started when first CPU enables the governor,
@@ -1520,7 +1724,18 @@ static int __init adaptive_governor_init(void)
 	INIT_DELAYED_WORK(&battery_check_work, adaptive_battery_check_worker);
 
 	/* Register governor with cpuidle subsystem */
-	return cpuidle_register_governor(&adaptive_governor);
+	ret = cpuidle_register_governor(&adaptive_governor);
+	if (ret)
+		return ret;
+
+	/*
+	 * Best-effort sysfs setup. Failure here doesn't break the governor
+	 * itself — adaptive will run with compiled-in defaults — so don't
+	 * propagate the error.
+	 */
+	adaptive_sysfs_init();
+
+	return 0;
 }
 
 postcore_initcall(adaptive_governor_init);
