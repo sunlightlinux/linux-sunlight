@@ -187,7 +187,17 @@
  */
 #define PROMOTION_IDLE_THRESHOLD_NS	(100 * NSEC_PER_USEC)	/* Min 100μs idle for promotion */
 #define PROMOTION_LATENCY_THRESHOLD_NS	(18 * NSEC_PER_USEC)	/* Min 18μs latency_req (C2-like) */
-#define PROMOTION_RESIDENCY_FACTOR	125	/* Accept 80% of target residency (125/100) */
+/*
+ * Promotion residency factors. The "loose" 125 factor accepts a state when
+ * the predicted idle window is at least 80% of its target_residency. This is
+ * fine for an idle laptop (we win battery life), but on AC with active work
+ * it's a net loss: predicted=800μs, target_C6=1ms ⇒ we enter C6, the next IRQ
+ * arrives at 800μs, and we just paid C6 entry/exit for sub-target residency.
+ * The "strict" 100 factor requires predicted_ns ≥ target, which we use on
+ * AC + load>0.
+ */
+#define PROMOTION_RESIDENCY_FACTOR_LOOSE	125	/* Accept 80% of target (idle/battery) */
+#define PROMOTION_RESIDENCY_FACTOR_STRICT	100	/* Require full target (AC + load>0) */
 
 /*
  * Enhanced tick stop logic (from Mobile governor)
@@ -1036,6 +1046,24 @@ static int adaptive_select(struct cpuidle_driver *drv,
 		/* Currently selected POLL or C1 - try to promote */
 		if (predicted_ns > PROMOTION_IDLE_THRESHOLD_NS &&
 		    latency_req >= PROMOTION_LATENCY_THRESHOLD_NS) {
+			u32 residency_factor;
+
+			/*
+			 * Strict factor (require full target_residency) when we
+			 * have evidence of active work on AC: a wake is likely
+			 * sooner than the typical-interval predictor expects, and
+			 * paying entry/exit for a state we won't fully amortize is
+			 * a net loss. On battery or with no observable work, fall
+			 * back to the loose 80% factor to maximize residency.
+			 */
+			if (!atomic_read(&global_battery_mode) &&
+			    (data->cached_battery_boost == 0) &&
+			    (READ_ONCE(this_cpu_ptr(&runqueues)->nr_running) > 0 ||
+			     nr_iowait_cpu(dev->cpu) > 0))
+				residency_factor = PROMOTION_RESIDENCY_FACTOR_STRICT;
+			else
+				residency_factor = PROMOTION_RESIDENCY_FACTOR_LOOSE;
+
 			/* We have sufficient idle time and latency headroom */
 			for (i = 2; i < drv->state_count; i++) {
 				struct cpuidle_state *s = &drv->states[i];
@@ -1055,12 +1083,12 @@ static int adaptive_select(struct cpuidle_driver *drv,
 					break;
 
 				/*
-				 * Aggressive residency check: accept 80% of target
-				 * (standard would require 100%)
-				 * Formula: target_residency * 125 / 100 > predicted_ns
+				 * Residency check. With LOOSE factor (125) we
+				 * accept 80% of target; with STRICT factor (100)
+				 * we require predicted ≥ target.
 				 */
 				if (s->target_residency_ns >
-				    (predicted_ns * PROMOTION_RESIDENCY_FACTOR / 100))
+				    (predicted_ns * residency_factor / 100))
 					break;
 
 				/* This state is acceptable - promote to it */
@@ -1285,10 +1313,20 @@ static void adaptive_update(struct cpuidle_driver *drv,
 						    data->fallback_ema_short,
 						    FALLBACK_EMA_SHIFT);
 
-	/* Check if reschedule happened */
+	/*
+	 * Refresh EMA on a resched (the meaningful "we actually had work to
+	 * run" signal) or at least every 100ms, whichever comes first. The
+	 * 100ms floor keeps idle_ema_avg from going stale on a CPU that has
+	 * been idle for a long time without any reschedule activity.
+	 *
+	 * NOTE: an earlier revision of this code had the time_after() check
+	 * negated, which inverted the intent — EMA was only refreshed during
+	 * the first 100ms after the previous update and then frozen until the
+	 * next resched. Keep the un-negated form here.
+	 */
 	if (need_resched() ||
-	    !time_after(jiffies, data->last_jiffies +
-			msecs_to_jiffies(100))) {
+	    time_after(jiffies, data->last_jiffies +
+		       msecs_to_jiffies(100))) {
 		data->idle_ema_avg = adaptive_ema_new(data->idle_total,
 						      data->idle_ema_avg,
 						      data->ema_alpha_shift);
