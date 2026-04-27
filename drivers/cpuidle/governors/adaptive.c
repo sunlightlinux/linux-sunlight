@@ -92,7 +92,21 @@
 #define INTERVALS (1UL << INTERVAL_SHIFT)
 #define RESOLUTION 1024
 #define DECAY 4  /* Menu-TNG compatibility: faster adaptation (was 8) */
+
+/*
+ * MAX_INTERESTING bounds the residencies we feed back into the bucket
+ * correction factor. The desktop default of 50ms matches the menu/mobile
+ * governors and is fine for interactive workloads. Servers (especially
+ * overnight-idle boxes or hosts with long sleep windows between RPC bursts)
+ * can see legitimate residencies of hundreds of ms; capping at 50ms there
+ * just throws those samples away as "near-infinite". Bump to 500ms when
+ * compiled with the server profile.
+ */
+#ifdef CONFIG_CPU_IDLE_GOV_ADAPTIVE_SERVER
+#define MAX_INTERESTING (500000 * NSEC_PER_USEC)
+#else
 #define MAX_INTERESTING (50000 * NSEC_PER_USEC)
+#endif
 
 /* EMA constants (from Mobile) */
 #define EMA_ALPHA_SHIFT_DEFAULT		7
@@ -362,10 +376,12 @@ struct adaptive_device {
 	/* ---- WARM: workload detection (rate-limited) ------------------- */
 	unsigned long	last_workload_check;	/* jiffies of last network sample */
 	unsigned long	battery_cache_jiffies;	/* jiffies of last battery read  */
+	unsigned long	multiplier_jiffies;	/* jiffies of last multiplier compute */
 	u32		network_activity_rx;
 	u32		network_activity_tx;
 	u8		cached_network_factor;	/* re-read every 10ms only */
 	u8		cached_battery_boost;	/* re-read every 500ms only */
+	u8		multiplier_quiet;	/* 1 if last compute saw load=io=0 */
 
 	/* ---- COLD: update path / EMA bookkeeping ----------------------- */
 	u64		idle_total;
@@ -376,7 +392,7 @@ struct adaptive_device {
 	u16		prediction_total;
 	u8		ema_alpha_shift;
 	u8		stats_update_counter;
-};
+} ____cacheline_aligned_in_smp;
 
 static DEFINE_PER_CPU(struct adaptive_device, adaptive_devices);
 
@@ -765,6 +781,22 @@ static void adaptive_update_multiplier(struct adaptive_device *data)
 {
 	u32 load, io, net, battery_boost;
 	s32 multiplier;
+	unsigned long now = jiffies;
+
+	/*
+	 * Same-jiffy fast-out for a quiet CPU. If the previous call saw no
+	 * load and no IO and we haven't crossed a jiffy boundary since, the
+	 * inputs cannot have changed (load/io are per-CPU and we are the only
+	 * writer; cached_network_factor / cached_battery_boost have their own
+	 * 10ms / 500ms TTLs, both ≥ 1 jiffy on any HZ ≥ 100). Reuse the
+	 * stored multiplier and skip the read+arithmetic+clamp work entirely.
+	 *
+	 * Drops adaptive_update_multiplier() to a single load+compare+branch
+	 * on the common all-idle path on big servers where adaptive_select()
+	 * fires hundreds of thousands of times per second per CPU.
+	 */
+	if (data->multiplier_quiet && data->multiplier_jiffies == now)
+		return;
 
 	load = adaptive_calc_load_factor();
 	io = adaptive_calc_io_factor();
@@ -778,10 +810,14 @@ static void adaptive_update_multiplier(struct adaptive_device *data)
 	if (load == 0 && io == 0) {
 		net = data->cached_network_factor;
 		battery_boost = adaptive_calc_battery_boost(data);
+		data->multiplier_quiet = 1;
 	} else {
 		net = adaptive_calc_network_factor(data);
 		battery_boost = adaptive_calc_battery_boost(data);
+		data->multiplier_quiet = 0;
 	}
+
+	data->multiplier_jiffies = now;
 
 	/* Menu-TNG formula: base + load + io + net - battery_boost */
 	multiplier = (s32)BASE_MULTIPLIER + load + io + net - battery_boost;
@@ -852,6 +888,7 @@ static int adaptive_select(struct cpuidle_driver *drv,
 	ktime_t delta, delta_tick;
 	u32 multiplier;
 	int i, idx;
+	bool sibling_busy;
 
 	/* Handle deferred update from reflect */
 	if (data->needs_update) {
@@ -865,6 +902,14 @@ static int adaptive_select(struct cpuidle_driver *drv,
 	/* Update performance multiplier based on current workload */
 	adaptive_update_multiplier(data);
 	multiplier = data->performance_multiplier;
+
+	/*
+	 * Compute the SMT-sibling-busy flag once and reuse it for both the
+	 * promotion gate and the post-cap demotion. adaptive_sibling_busy()
+	 * walks the sibling cpumask, so caching the result avoids redundant
+	 * cpumask reads on hot SMT systems.
+	 */
+	sibling_busy = adaptive_sibling_busy(dev->cpu);
 
 	/* Find shortest expected idle interval */
 	predicted_ns = get_typical_interval(data) * NSEC_PER_USEC;
@@ -1041,8 +1086,7 @@ static int adaptive_select(struct cpuidle_driver *drv,
 	 * drop the package state, so promoting here would only buy us the
 	 * exit-latency penalty.
 	 */
-	if (idx <= 1 && drv->state_count > 2 &&
-	    !adaptive_sibling_busy(dev->cpu)) {
+	if (idx <= 1 && drv->state_count > 2 && !sibling_busy) {
 		/* Currently selected POLL or C1 - try to promote */
 		if (predicted_ns > PROMOTION_IDLE_THRESHOLD_NS &&
 		    latency_req >= PROMOTION_LATENCY_THRESHOLD_NS) {
@@ -1104,7 +1148,7 @@ static int adaptive_select(struct cpuidle_driver *drv,
 	 * latency is wasted. Demote to idx 1 (typically C1) which is a
 	 * thread-local state and not gated by sibling activity.
 	 */
-	if (idx >= 2 && adaptive_sibling_busy(dev->cpu))
+	if (idx >= 2 && sibling_busy)
 		idx = !dev->states_usage[1].disable ? 1 : 0;
 
 	/*
