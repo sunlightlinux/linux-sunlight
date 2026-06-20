@@ -19,7 +19,7 @@
 #include <trace/events/netfs.h>
 #include "internal.h"
 
-static int afs_file_mmap_prepare(struct vm_area_desc *desc);
+static int afs_file_mmap(struct file *file, struct vm_area_struct *vma);
 
 static ssize_t afs_file_read_iter(struct kiocb *iocb, struct iov_iter *iter);
 static ssize_t afs_file_splice_read(struct file *in, loff_t *ppos,
@@ -35,7 +35,7 @@ const struct file_operations afs_file_operations = {
 	.llseek		= generic_file_llseek,
 	.read_iter	= afs_file_read_iter,
 	.write_iter	= netfs_file_write_iter,
-	.mmap_prepare	= afs_file_mmap_prepare,
+	.mmap		= afs_file_mmap,
 	.splice_read	= afs_file_splice_read,
 	.splice_write	= iter_file_splice_write,
 	.fsync		= afs_fsync,
@@ -424,19 +424,33 @@ static void afs_free_request(struct netfs_io_request *rreq)
 	afs_put_wb_key(rreq->netfs_priv2);
 }
 
-static void afs_update_i_size(struct inode *inode, loff_t new_i_size)
+/*
+ * Set the file size and block count, taking ->cb_lock and ->i_lock to maintain
+ * coherency and prevent 64-bit tearing on 32-bit arches.
+ *
+ * Also, estimate the number of 512 bytes blocks used, rounded up to nearest 1K
+ * for consistency with other AFS clients.
+ */
+void afs_set_i_size(struct afs_vnode *vnode, loff_t new_i_size)
 {
-	struct afs_vnode *vnode = AFS_FS_I(inode);
+	struct inode *inode = &vnode->netfs.inode;
 	loff_t i_size;
 
 	write_seqlock(&vnode->cb_lock);
-	i_size = i_size_read(&vnode->netfs.inode);
+	spin_lock(&inode->i_lock);
+	i_size = i_size_read(inode);
 	if (new_i_size > i_size) {
-		i_size_write(&vnode->netfs.inode, new_i_size);
-		inode_set_bytes(&vnode->netfs.inode, new_i_size);
+		i_size_write(inode, new_i_size);
+		inode_set_bytes(inode, round_up(new_i_size, 1024));
 	}
+	spin_unlock(&inode->i_lock);
 	write_sequnlock(&vnode->cb_lock);
 	fscache_update_cookie(afs_vnode_cache(vnode), NULL, &new_i_size);
+}
+
+static void afs_update_i_size(struct inode *inode, loff_t new_i_size)
+{
+	afs_set_i_size(AFS_FS_I(inode), new_i_size);
 }
 
 static void afs_netfs_invalidate_cache(struct netfs_io_request *wreq)
@@ -492,16 +506,16 @@ static void afs_drop_open_mmap(struct afs_vnode *vnode)
 /*
  * Handle setting up a memory mapping on an AFS file.
  */
-static int afs_file_mmap_prepare(struct vm_area_desc *desc)
+static int afs_file_mmap(struct file *file, struct vm_area_struct *vma)
 {
-	struct afs_vnode *vnode = AFS_FS_I(file_inode(desc->file));
+	struct afs_vnode *vnode = AFS_FS_I(file_inode(file));
 	int ret;
 
 	afs_add_open_mmap(vnode);
 
-	ret = generic_file_mmap_prepare(desc);
+	ret = generic_file_mmap(file, vma);
 	if (ret == 0)
-		desc->vm_ops = &afs_vm_ops;
+		vma->vm_ops = &afs_vm_ops;
 	else
 		afs_drop_open_mmap(vnode);
 	return ret;
