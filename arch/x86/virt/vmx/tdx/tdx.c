@@ -1237,7 +1237,7 @@ static __init int tdx_enable(void)
 	int ret;
 
 	if (!cpu_feature_enabled(X86_FEATURE_TDX_HOST_PLATFORM)) {
-		pr_err("TDX not supported by the host platform\n");
+		pr_warn("TDX not supported by the host platform\n");
 		return -ENODEV;
 	}
 
