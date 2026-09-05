@@ -2853,6 +2853,7 @@ ufshcd_prepare_req_desc_hdr(struct ufs_hba *hba, struct ufshcd_lrb *lrbp,
  * for scsi commands
  * @cmd: SCSI command
  * @upiu_flags: flags
+ * @iid: Initiator ID to set in the UPIU header
  */
 static void ufshcd_prepare_utp_scsi_cmd_upiu(struct scsi_cmnd *cmd,
 					     u8 upiu_flags, u8 iid)
@@ -2886,6 +2887,7 @@ static void ufshcd_prepare_utp_scsi_cmd_upiu(struct scsi_cmnd *cmd,
  * @hba: UFS hba
  * @cmd: SCSI command pointer
  * @upiu_flags: flags
+ * @iid: Initiator ID to set in the UPIU header
  */
 static void ufshcd_prepare_utp_query_req_upiu(struct ufs_hba *hba,
 				struct scsi_cmnd *cmd, u8 upiu_flags, u8 iid)
