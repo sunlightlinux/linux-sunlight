@@ -1116,7 +1116,10 @@ struct mlx5_ifc_qos_cap_bits {
 	u8         log_esw_max_sched_depth[0x4];
 	u8         reserved_at_10[0x10];
 
-	u8         reserved_at_20[0x9];
+	u8         reserved_at_20[0x2];
+	u8         packet_pacing_req_ud[0x1];
+	u8         packet_pacing_req_uc[0x1];
+	u8         reserved_at_24[0x5];
 	u8         esw_cross_esw_sched[0x1];
 	u8         reserved_at_2a[0x1];
 	u8         log_max_qos_nic_queue_group[0x5];
@@ -3709,7 +3712,8 @@ struct mlx5_ifc_qpc_bits {
 	u8         cur_retry_count[0x3];
 	u8         reserved_at_39b[0x5];
 
-	u8         reserved_at_3a0[0x20];
+	u8         reserved_at_3a0[0x10];
+	u8         packet_pacing_rate_limit_index[0x10];
 
 	u8         reserved_at_3c0[0x8];
 	u8         next_send_psn[0x18];
@@ -12211,18 +12215,7 @@ struct mlx5_ifc_mcia_reg_bits {
 
 	u8         reserved_at_60[0x20];
 
-	u8         dword_0[0x20];
-	u8         dword_1[0x20];
-	u8         dword_2[0x20];
-	u8         dword_3[0x20];
-	u8         dword_4[0x20];
-	u8         dword_5[0x20];
-	u8         dword_6[0x20];
-	u8         dword_7[0x20];
-	u8         dword_8[0x20];
-	u8         dword_9[0x20];
-	u8         dword_10[0x20];
-	u8         dword_11[0x20];
+	u8         dwords[0x400];
 };
 
 struct mlx5_ifc_dcbx_param_bits {

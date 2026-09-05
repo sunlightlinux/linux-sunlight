@@ -1,11 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
   FUSE: Filesystem in Userspace
   Copyright (C) 2001-2008  Miklos Szeredi <miklos@szeredi.hu>
-
-  This program can be distributed under the terms of the GNU GPL.
-  See the file COPYING.
 */
 
+#include "dev.h"
 #include "fuse_i.h"
 
 #include <linux/pagemap.h>
@@ -317,7 +316,7 @@ void fuse_invalidate_attr(struct inode *inode)
 
 static void fuse_dir_changed(struct inode *dir)
 {
-	fuse_invalidate_attr(dir);
+	fuse_invalidate_attr_mask(dir, FUSE_STATX_MODDIR);
 	inode_maybe_inc_iversion(dir, false);
 }
 
@@ -430,7 +429,7 @@ static int fuse_dentry_revalidate(struct inode *dir, const struct qstr *name,
 			fi = get_fuse_inode(inode);
 			if (outarg.nodeid != get_node_id(inode) ||
 			    (bool) IS_AUTOMOUNT(inode) != (bool) (outarg.attr.flags & FUSE_ATTR_SUBMOUNT)) {
-				fuse_queue_forget(fm->fc, forget,
+				fuse_chan_queue_forget(fm->fc->chan, forget,
 						  outarg.nodeid, 1);
 				goto invalid;
 			}
@@ -553,7 +552,6 @@ static void fuse_dentry_canonical_path(const struct path *path,
 	args.out_numargs = 1;
 	args.out_args[0].size = PATH_MAX;
 	args.out_args[0].value = path_name;
-	args.canonical_path = canonical_path;
 	args.out_argvar = 1;
 
 	err = fuse_simple_request(fm, &args);
@@ -633,7 +631,7 @@ int fuse_lookup_name(struct super_block *sb, u64 nodeid, const struct qstr *name
 			   attr_version, evict_ctr);
 	err = -ENOMEM;
 	if (!*inode) {
-		fuse_queue_forget(fm->fc, forget, outarg->nodeid, 1);
+		fuse_chan_queue_forget(fm->fc->chan, forget, outarg->nodeid, 1);
 		goto out;
 	}
 	err = 0;
@@ -877,7 +875,6 @@ static int fuse_create_open(struct mnt_idmap *idmap, struct inode *dir,
 	if (!forget)
 		goto out_err;
 
-	err = -ENOMEM;
 	ff = fuse_file_alloc(fm, true);
 	if (!ff)
 		goto out_put_forget_req;
@@ -934,7 +931,7 @@ static int fuse_create_open(struct mnt_idmap *idmap, struct inode *dir,
 	if (!inode) {
 		flags &= ~(O_CREAT | O_EXCL | O_TRUNC);
 		fuse_sync_release(NULL, ff, flags);
-		fuse_queue_forget(fm->fc, forget, outentry.nodeid, 1);
+		fuse_chan_queue_forget(fm->fc->chan, forget, outentry.nodeid, 1);
 		err = -ENOMEM;
 		goto out_err;
 	}
@@ -1059,7 +1056,7 @@ static struct dentry *create_new_entry(struct mnt_idmap *idmap, struct fuse_moun
 	inode = fuse_iget(dir->i_sb, outarg.nodeid, outarg.generation,
 			  &outarg.attr, ATTR_TIMEOUT(&outarg), 0, 0);
 	if (!inode) {
-		fuse_queue_forget(fm->fc, forget, outarg.nodeid, 1);
+		fuse_chan_queue_forget(fm->fc->chan, forget, outarg.nodeid, 1);
 		return ERR_PTR(-ENOMEM);
 	}
 	kfree(forget);
@@ -1627,40 +1624,34 @@ int fuse_reverse_inval_entry(struct fuse_conn *fc, u64 parent_nodeid,
 {
 	int err = -ENOTDIR;
 	struct inode *parent;
-	struct dentry *dir = NULL;
-	struct dentry *entry = NULL;
+	struct dentry *dir;
+	struct dentry *entry;
 
 	parent = fuse_ilookup(fc, parent_nodeid, NULL);
 	if (!parent)
 		return -ENOENT;
 
+	inode_lock_nested(parent, I_MUTEX_PARENT);
 	if (!S_ISDIR(parent->i_mode))
-		goto put_parent;
+		goto unlock;
 
 	err = -ENOENT;
 	dir = d_find_alias(parent);
 	if (!dir)
-		goto put_parent;
-	while (!entry) {
-		struct dentry *child = try_lookup_noperm(name, dir);
-		if (!child || IS_ERR(child))
-			goto put_parent;
-		entry = start_removing_dentry(dir, child);
-		dput(child);
-		if (IS_ERR(entry))
-			goto put_parent;
-		if (!d_same_name(entry, dir, name)) {
-			end_removing(entry);
-			entry = NULL;
-		}
-	}
+		goto unlock;
+
+	name->hash = full_name_hash(dir, name->name, name->len);
+	entry = d_lookup(dir, name);
+	dput(dir);
+	if (!entry)
+		goto unlock;
 
 	fuse_dir_changed(parent);
 	if (!(flags & FUSE_EXPIRE_ONLY))
 		d_invalidate(entry);
 	fuse_invalidate_entry_cache(entry);
 
-	if (child_nodeid != 0) {
+	if (child_nodeid != 0 && d_really_is_positive(entry)) {
 		inode_lock(d_inode(entry));
 		if (get_node_id(d_inode(entry)) != child_nodeid) {
 			err = -ENOENT;
@@ -1688,10 +1679,10 @@ int fuse_reverse_inval_entry(struct fuse_conn *fc, u64 parent_nodeid,
 	} else {
 		err = 0;
 	}
+	dput(entry);
 
-	end_removing(entry);
- put_parent:
-	dput(dir);
+ unlock:
+	inode_unlock(parent);
 	iput(parent);
 	return err;
 }
@@ -2209,10 +2200,8 @@ int fuse_do_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 		filemap_invalidate_lock(mapping);
 		fault_blocked = true;
 		err = fuse_dax_break_layouts(inode, 0, -1);
-		if (err) {
-			filemap_invalidate_unlock(mapping);
-			return err;
-		}
+		if (err)
+			goto unlock;
 	}
 
 	if (attr->ia_valid & ATTR_OPEN) {
@@ -2239,7 +2228,7 @@ int fuse_do_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 			 ATTR_TIMES_SET)) {
 		err = write_inode_now(inode, true);
 		if (err)
-			return err;
+			goto unlock;
 
 		fuse_set_nowrite(inode);
 		fuse_release_nowrite(inode);
@@ -2347,6 +2336,7 @@ error:
 
 	clear_bit(FUSE_I_SIZE_UNSTABLE, &fi->state);
 
+unlock:
 	if (fault_blocked)
 		filemap_invalidate_unlock(mapping);
 	return err;
