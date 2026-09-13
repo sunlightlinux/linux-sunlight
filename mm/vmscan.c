@@ -201,6 +201,13 @@ struct scan_control {
  */
 int vm_swappiness = 60;
 
+static int sc_swappiness(struct scan_control *sc, struct mem_cgroup *memcg)
+{
+	if (sc->proactive && sc->proactive_swappiness)
+		return *sc->proactive_swappiness;
+	return mem_cgroup_swappiness(memcg);
+}
+
 #ifdef CONFIG_MEMCG
 
 /* Returns true for reclaim through cgroup limits or cgroup interfaces. */
@@ -241,13 +248,6 @@ static bool writeback_throttling_sane(struct scan_control *sc)
 #endif
 	return false;
 }
-
-static int sc_swappiness(struct scan_control *sc, struct mem_cgroup *memcg)
-{
-	if (sc->proactive && sc->proactive_swappiness)
-		return *sc->proactive_swappiness;
-	return mem_cgroup_swappiness(memcg);
-}
 #else
 static bool cgroup_reclaim(struct scan_control *sc)
 {
@@ -262,11 +262,6 @@ static bool root_reclaim(struct scan_control *sc)
 static bool writeback_throttling_sane(struct scan_control *sc)
 {
 	return true;
-}
-
-static int sc_swappiness(struct scan_control *sc, struct mem_cgroup *memcg)
-{
-	return READ_ONCE(vm_swappiness);
 }
 #endif
 
@@ -615,10 +610,37 @@ typedef enum {
 	PAGE_CLEAN,
 } pageout_t;
 
-static pageout_t writeout(struct folio *folio, struct address_space *mapping,
-		struct swap_iocb **plug, struct list_head *folio_list)
+/*
+ * pageout is called by shrink_folio_list() for each dirty folio.
+ */
+static pageout_t pageout(struct folio *folio, struct address_space *mapping,
+			 struct swap_iocb **plug, struct list_head *folio_list)
 {
 	int res;
+
+	/*
+	 * We no longer attempt to writeback filesystem folios here, other
+	 * than tmpfs/shmem.  That's taken care of in page-writeback.
+	 * If we find a dirty filesystem folio at the end of the LRU list,
+	 * typically that means the filesystem is saturating the storage
+	 * with contiguous writes and telling it to write a folio here
+	 * would only make the situation worse by injecting an element
+	 * of random access.
+	 *
+	 * If the folio is swapcache, write it back even if that would
+	 * block, for some throttling. This happens by accident, because
+	 * swap_backing_dev_info is bust: it doesn't reflect the
+	 * congestion state of the swapdevs.  Easy to fix, if needed.
+	 *
+	 * A freeable shmem or swapcache folio is referenced only by the
+	 * caller that isolated the folio and the page cache.
+	 */
+	if (folio_ref_count(folio) != 1 + folio_nr_pages(folio) || !mapping)
+		return PAGE_KEEP;
+	if (!shmem_mapping(mapping) && !folio_test_anon(folio))
+		return PAGE_ACTIVATE;
+	if (!folio_clear_dirty_for_io(folio))
+		return PAGE_CLEAN;
 
 	folio_set_reclaim(folio);
 
@@ -646,38 +668,6 @@ static pageout_t writeout(struct folio *folio, struct address_space *mapping,
 	trace_mm_vmscan_write_folio(folio);
 	node_stat_add_folio(folio, NR_VMSCAN_WRITE);
 	return PAGE_SUCCESS;
-}
-
-/*
- * pageout is called by shrink_folio_list() for each dirty folio.
- */
-static pageout_t pageout(struct folio *folio, struct address_space *mapping,
-			 struct swap_iocb **plug, struct list_head *folio_list)
-{
-	/*
-	 * We no longer attempt to writeback filesystem folios here, other
-	 * than tmpfs/shmem.  That's taken care of in page-writeback.
-	 * If we find a dirty filesystem folio at the end of the LRU list,
-	 * typically that means the filesystem is saturating the storage
-	 * with contiguous writes and telling it to write a folio here
-	 * would only make the situation worse by injecting an element
-	 * of random access.
-	 *
-	 * If the folio is swapcache, write it back even if that would
-	 * block, for some throttling. This happens by accident, because
-	 * swap_backing_dev_info is bust: it doesn't reflect the
-	 * congestion state of the swapdevs.  Easy to fix, if needed.
-	 *
-	 * A freeable shmem or swapcache folio is referenced only by the
-	 * caller that isolated the folio and the page cache.
-	 */
-	if (folio_ref_count(folio) != 1 + folio_nr_pages(folio) || !mapping)
-		return PAGE_KEEP;
-	if (!shmem_mapping(mapping) && !folio_test_anon(folio))
-		return PAGE_ACTIVATE;
-	if (!folio_clear_dirty_for_io(folio))
-		return PAGE_CLEAN;
-	return writeout(folio, mapping, plug, folio_list);
 }
 
 /*
@@ -3276,7 +3266,7 @@ static void update_batch_size(struct lru_gen_mm_walk *walk, struct folio *folio,
 static void reset_batch_size(struct lru_gen_mm_walk *walk)
 {
 	int gen, type, zone;
-	struct lruvec *lruvec = walk->lruvec;
+	struct lruvec *lruvec = lruvec_live_lock_irq(walk->lruvec);
 	struct lru_gen_folio *lrugen = &lruvec->lrugen;
 
 	walk->batched = 0;
@@ -3296,6 +3286,8 @@ static void reset_batch_size(struct lru_gen_mm_walk *walk)
 			lru += LRU_ACTIVE;
 		__update_lru_size(lruvec, lru, zone, delta);
 	}
+
+	lruvec_unlock_irq(lruvec);
 }
 
 static int should_skip_vma(unsigned long start, unsigned long end, struct mm_walk *args)
@@ -3790,11 +3782,8 @@ static void walk_mm(struct mm_struct *mm, struct lru_gen_mm_walk *walk)
 			mmap_read_unlock(mm);
 		}
 
-		if (walk->batched) {
-			lruvec_lock_irq(lruvec);
+		if (walk->batched)
 			reset_batch_size(walk);
-			lruvec_unlock_irq(lruvec);
-		}
 
 		cond_resched();
 	} while (err == -EAGAIN);
@@ -4585,7 +4574,6 @@ void lru_gen_reparent_memcg(struct mem_cgroup *memcg, struct mem_cgroup *parent,
 static bool sort_folio(struct lruvec *lruvec, struct folio *folio, struct scan_control *sc,
 		       int tier_idx)
 {
-	bool success;
 	int gen = folio_lru_gen(folio);
 	int type = folio_is_file_lru(folio);
 	int zone = folio_zonenum(folio);
@@ -4597,15 +4585,9 @@ static bool sort_folio(struct lruvec *lruvec, struct folio *folio, struct scan_c
 
 	VM_WARN_ON_ONCE_FOLIO(gen >= MAX_NR_GENS, folio);
 
-	/* unevictable */
-	if (!folio_evictable(folio)) {
-		success = lru_gen_del_folio(lruvec, folio, true);
-		VM_WARN_ON_ONCE_FOLIO(!success, folio);
-		folio_set_unevictable(folio);
-		lruvec_add_folio(lruvec, folio);
-		__count_vm_events(UNEVICTABLE_PGCULLED, delta);
-		return true;
-	}
+	/* unevictable: let it through and the generic path will cull it */
+	if (!folio_evictable(folio))
+		return false;
 
 	/* promoted */
 	if (gen != lru_gen_from_seq(lrugen->min_seq[type])) {
@@ -4855,11 +4837,9 @@ retry:
 	list_for_each_entry_safe_reverse(folio, next, &list, lru) {
 		DEFINE_MIN_SEQ(lruvec);
 
-		if (!folio_evictable(folio)) {
-			list_del(&folio->lru);
-			folio_putback_lru(folio);
+		/* move_folios_to_lru() culls unevictable folios via folio_putback_lru() */
+		if (!folio_evictable(folio))
 			continue;
-		}
 
 		/* retry folios that may have missed folio_rotate_reclaimable() */
 		if (!skip_retry && !folio_test_active(folio) && !folio_mapped(folio) &&
@@ -4878,9 +4858,7 @@ retry:
 	walk = current->reclaim_state->mm_walk;
 	if (walk && walk->batched) {
 		walk->lruvec = lruvec;
-		lruvec_lock_irq(lruvec);
 		reset_batch_size(walk);
-		lruvec_unlock_irq(lruvec);
 	}
 
 	mod_lruvec_state(lruvec, PGDEMOTE_KSWAPD + reclaimer_offset(sc),
@@ -4939,6 +4917,9 @@ static bool should_abort_scan(struct lruvec *lruvec, struct scan_control *sc)
 {
 	int i;
 	enum zone_watermarks mark;
+
+	if (unlikely(sc->proactive && signal_pending(current)))
+		return true;
 
 	if (sc->nr_reclaimed >= max(sc->nr_to_reclaim, compact_gap(sc->order)))
 		return true;
@@ -5938,7 +5919,7 @@ static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 			}
 		}
 
-		cond_resched();
+		cond_resched_tasks_rcu_qs();
 
 		if (nr_reclaimed < nr_to_reclaim || proportional_reclaim)
 			continue;
@@ -6717,11 +6698,11 @@ unsigned long try_to_free_pages(struct zonelist *zonelist, int order,
 		return 1;
 
 	set_task_reclaim_state(current, &sc.reclaim_state);
-	trace_mm_vmscan_direct_reclaim_begin(sc.gfp_mask, order, 0);
+	trace_mm_vmscan_direct_reclaim_begin(sc.gfp_mask, order, NULL);
 
 	nr_reclaimed = do_try_to_free_pages(zonelist, &sc);
 
-	trace_mm_vmscan_direct_reclaim_end(nr_reclaimed, 0);
+	trace_mm_vmscan_direct_reclaim_end(nr_reclaimed, NULL);
 	set_task_reclaim_state(current, NULL);
 
 	return nr_reclaimed;
@@ -7787,7 +7768,7 @@ static unsigned long __node_reclaim(struct pglist_data *pgdat, gfp_t gfp_mask,
 	delayacct_freepages_end();
 	psi_memstall_leave(&pflags);
 
-	trace_mm_vmscan_node_reclaim_end(sc->nr_reclaimed, 0);
+	trace_mm_vmscan_node_reclaim_end(sc->nr_reclaimed, NULL);
 
 	return sc->nr_reclaimed;
 }
@@ -7920,8 +7901,15 @@ int user_proactive_reclaim(char *buf,
 		unsigned long batch_size = (nr_to_reclaim - nr_reclaimed) / 4;
 		unsigned long reclaimed;
 
+		/*
+		 * Return -ERESTARTSYS to allow the freezer to interrupt the
+		 * task. The syscall will be transparently restarted upon
+		 * resume. For real signals, it either restarts the syscall
+		 * (if SA_RESTART is set) or is converted to -EINTR by the
+		 * signal layer.
+		 */
 		if (signal_pending(current))
-			return -EINTR;
+			return -ERESTARTSYS;
 
 		/*
 		 * This is the final attempt, drain percpu lru caches in the

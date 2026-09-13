@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * BPF-side helpers for cids and cmasks. See kernel/sched/ext_cid.h for the
+ * BPF-side helpers for cids and cmasks. See kernel/sched/ext/cid.h for the
  * authoritative layout and semantics. The BPF-side helpers use the cmask_*
  * naming (no scx_ prefix); cmask is the SCX bitmap type so the prefix is
  * redundant in BPF code. Atomics use __sync_val_compare_and_swap and every
@@ -33,7 +33,7 @@
 #endif
 
 /*
- * Mirrors SCX_CMASK_NR_WORDS in kernel/sched/ext_types.h. The u64 cast keeps
+ * Mirrors SCX_CMASK_NR_WORDS in kernel/sched/ext/types.h. The u64 cast keeps
  * the +63 from wrapping when @nr_cids is near U32_MAX, so cmask_reframe()
  * bounds-checking the result against alloc_words catches the overflow instead
  * of seeing a small value.
@@ -281,7 +281,7 @@ static __always_inline void cmask_zero(struct scx_cmask __arena *m)
 
 /*
  * BPF_-prefixed to avoid colliding with the kernel's anonymous CMASK_OP_*
- * enum in ext_cid.c, which is exported via BTF and reachable through
+ * enum in ext/cid.c, which is exported via BTF and reachable through
  * vmlinux.h.
  */
 enum {
@@ -391,42 +391,14 @@ static __always_inline bool cmask_equal(const struct scx_cmask __arena *a,
 
 	if (a->base != b->base || a->nr_cids != b->nr_cids)
 		return false;
-	nr_words = CMASK_NR_WORDS(a->nr_cids);
+	if (a->nr_cids == 0)
+		return true;
+	nr_words = (a->base + a->nr_cids - 1) / 64 - a->base / 64 + 1;
 
 	bpf_for(i, 0, CMASK_MAX_WORDS) {
 		if (i >= nr_words)
 			break;
 		if (a->bits[i] != b->bits[i])
-			return false;
-	}
-	return true;
-}
-
-/*
- * True iff every bit set in @a is also set in @b over the intersection of
- * their ranges. Bits of @a outside @b's range fail the test.
- */
-static __always_inline bool cmask_subset(const struct scx_cmask __arena *a,
-					 const struct scx_cmask __arena *b)
-{
-	u32 a_end = a->base + a->nr_cids;
-	u32 b_end = b->base + b->nr_cids;
-	u32 a_wbase = a->base / 64;
-	u32 b_wbase = b->base / 64;
-	u32 nr_words, i;
-
-	/* any bit of @a outside @b's range is a subset violation */
-	if (a->base < b->base || a_end > b_end)
-		return false;
-
-	nr_words = CMASK_NR_WORDS(a->nr_cids);
-	bpf_for(i, 0, CMASK_MAX_WORDS) {
-		u32 wi_b;
-
-		if (i >= nr_words)
-			break;
-		wi_b = a_wbase + i - b_wbase;
-		if (a->bits[i] & ~b->bits[wi_b])
 			return false;
 	}
 	return true;
@@ -489,14 +461,64 @@ static __always_inline u32 cmask_first_set(const struct scx_cmask __arena *m)
 	     (cid) = cmask_next_set((m), (cid) + 1))
 
 /*
+ * True iff every bit set in @a is also set in @b. Matches the kernel-side
+ * scx_cmask_subset(): ranges don't need to nest, and set bits of @a outside
+ * @b's range fail the test.
+ */
+static __always_inline bool cmask_subset(const struct scx_cmask __arena *a,
+					 const struct scx_cmask __arena *b)
+{
+	u32 a_end = a->base + a->nr_cids;
+	u32 b_end = b->base + b->nr_cids;
+	u32 a_wbase = a->base / 64;
+	u32 b_wbase = b->base / 64;
+	u32 lo = a->base > b->base ? a->base : b->base;
+	u32 hi = a_end < b_end ? a_end : b_end;
+	u32 lo_word, hi_word, i;
+
+	/* set bits of @a outside @b's range can't be in @b */
+	if (a->base < b->base &&
+	    cmask_next_set(a, a->base) < (b->base < a_end ? b->base : a_end))
+		return false;
+	if (a_end > b_end &&
+	    cmask_next_set(a, a->base > b_end ? a->base : b_end) < a_end)
+		return false;
+
+	if (lo >= hi)
+		return true;
+
+	/*
+	 * Walk the words the range intersection spans. Plain word tests
+	 * suffice: the scans above guarantee @a has no set bit outside @b's
+	 * range and padding bits are kept clear by all cmask helpers.
+	 */
+	lo_word = lo / 64;
+	hi_word = (hi - 1) / 64;
+
+	bpf_for(i, 0, CMASK_MAX_WORDS) {
+		u32 w = lo_word + i;
+
+		if (w > hi_word)
+			break;
+		if (a->bits[w - a_wbase] & ~b->bits[w - b_wbase])
+			return false;
+	}
+	return true;
+}
+
+/*
  * Population count over [base, base + nr_cids). Padding bits in the head/tail
  * words are guaranteed zero by the mutating helpers, so a flat popcount over
- * all words is correct.
+ * the words the range spans is correct.
  */
 static __always_inline u32 cmask_weight(const struct scx_cmask __arena *m)
 {
-	u32 nr_words = CMASK_NR_WORDS(m->nr_cids), i;
+	u32 nr_words, i;
 	u32 count = 0;
+
+	if (!m->nr_cids)
+		return 0;
+	nr_words = (m->base + m->nr_cids - 1) / 64 - m->base / 64 + 1;
 
 	bpf_for(i, 0, CMASK_MAX_WORDS) {
 		if (i >= nr_words)

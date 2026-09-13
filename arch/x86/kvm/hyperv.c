@@ -627,6 +627,18 @@ static enum hrtimer_restart stimer_timer_callback(struct hrtimer *timer)
 }
 
 /*
+ * Translate a stimer expiry given in 100ns reference ticks into an
+ * an absolute deadline. Saturates on overflow.
+ */
+static ktime_t stimer_add_delta(ktime_t now, u64 delta_100ns)
+{
+	if (delta_100ns >= KTIME_MAX / 100)
+		return KTIME_MAX;
+
+	return ktime_add_safe(now, 100 * delta_100ns);
+}
+
+/*
  * stimer_start() assumptions:
  * a) stimer->count is not equal to 0
  * b) stimer->config has HV_STIMER_ENABLE flag
@@ -635,6 +647,7 @@ static int stimer_start(struct kvm_vcpu_hv_stimer *stimer)
 {
 	u64 time_now;
 	ktime_t ktime_now;
+	ktime_t deadline;
 
 	time_now = get_time_ref_counter(hv_stimer_to_vcpu(stimer)->kvm);
 	ktime_now = ktime_get();
@@ -657,10 +670,8 @@ static int stimer_start(struct kvm_vcpu_hv_stimer *stimer)
 					stimer->index,
 					time_now, stimer->exp_time);
 
-		hrtimer_start(&stimer->timer,
-			      ktime_add_ns(ktime_now,
-					   100 * (stimer->exp_time - time_now)),
-			      HRTIMER_MODE_ABS);
+		deadline = stimer_add_delta(ktime_now, stimer->exp_time - time_now);
+		hrtimer_start(&stimer->timer, deadline, HRTIMER_MODE_ABS);
 		return 0;
 	}
 	stimer->exp_time = stimer->count;
@@ -679,9 +690,9 @@ static int stimer_start(struct kvm_vcpu_hv_stimer *stimer)
 					   stimer->index,
 					   time_now, stimer->count);
 
-	hrtimer_start(&stimer->timer,
-		      ktime_add_ns(ktime_now, 100 * (stimer->count - time_now)),
-		      HRTIMER_MODE_ABS);
+	deadline = stimer_add_delta(ktime_now, stimer->count - time_now);
+	hrtimer_start(&stimer->timer, deadline, HRTIMER_MODE_ABS);
+
 	return 0;
 }
 
@@ -1974,6 +1985,7 @@ int kvm_hv_vcpu_flush_tlb(struct kvm_vcpu *vcpu)
 	u64 entries[KVM_HV_TLB_FLUSH_FIFO_SIZE];
 	int i, j, count;
 	gva_t gva;
+	bool full = false;
 
 	if (!tdp_enabled || !hv_vcpu)
 		return -EINVAL;
@@ -1982,7 +1994,7 @@ int kvm_hv_vcpu_flush_tlb(struct kvm_vcpu *vcpu)
 
 	count = kfifo_out(&tlb_flush_fifo->entries, entries, KVM_HV_TLB_FLUSH_FIFO_SIZE);
 
-	for (i = 0; i < count; i++) {
+	for (i = 0; i < count && !full; i++) {
 		if (entries[i] == KVM_HV_TLB_FLUSHALL_ENTRY)
 			goto out_flush_all;
 
@@ -1991,11 +2003,11 @@ int kvm_hv_vcpu_flush_tlb(struct kvm_vcpu *vcpu)
 		 * pages to flush.
 		 */
 		gva = entries[i] & PAGE_MASK;
-		for (j = 0; j < (entries[i] & ~PAGE_MASK) + 1; j++) {
+		for (j = 0; j < (entries[i] & ~PAGE_MASK) + 1 && !full; j++) {
 			if (is_noncanonical_invlpg_address(gva + j * PAGE_SIZE, vcpu))
 				continue;
 
-			kvm_x86_call(flush_tlb_gva)(vcpu, gva + j * PAGE_SIZE);
+			kvm_x86_call(flush_tlb_gva)(vcpu, gva + j * PAGE_SIZE, &full);
 		}
 
 		++vcpu->stat.tlb_flush;

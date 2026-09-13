@@ -558,6 +558,14 @@ struct bio *bio_alloc_bioset(struct block_device *bdev, unsigned short nr_vecs,
 		bio = bio_alloc_percpu_cache(bs);
 	} else {
 		opf &= ~REQ_ALLOC_CACHE;
+	}
+
+	/*
+	 * For a bioset without a percpu cache, or when the percpu cache was
+	 * empty, try a slab allocation with optimistic GFP_ flags before
+	 * falling back to the mempool.
+	 */
+	if (!bio) {
 		p = kmem_cache_alloc(bs->bio_slab, gfp);
 		if (p)
 			bio = p + bs->front_pad;
@@ -1194,7 +1202,7 @@ void bio_iov_bvec_set(struct bio *bio, const struct iov_iter *iter)
  * for the next iteration.
  */
 static int bio_iov_iter_align_down(struct bio *bio, struct iov_iter *iter,
-			    unsigned len_align_mask)
+				   struct bio_vec *bv, unsigned len_align_mask)
 {
 	size_t nbytes = bio->bi_iter.bi_size & len_align_mask;
 
@@ -1203,30 +1211,58 @@ static int bio_iov_iter_align_down(struct bio *bio, struct iov_iter *iter,
 
 	iov_iter_revert(iter, nbytes);
 	bio->bi_iter.bi_size -= nbytes;
-	do {
-		struct bio_vec *bv = &bio->bi_io_vec[bio->bi_vcnt - 1];
-
-		if (nbytes < bv->bv_len) {
-			bv->bv_len -= nbytes;
-			break;
-		}
-
+	while (nbytes >= bv->bv_len) {
 		if (bio_flagged(bio, BIO_PAGE_PINNED))
 			unpin_user_page(bv->bv_page);
 
-		bio->bi_vcnt--;
+		if (!--bio->bi_vcnt)
+			return -EFAULT;
 		nbytes -= bv->bv_len;
-	} while (nbytes);
-
-	if (!bio->bi_vcnt)
-		return -EFAULT;
+		bv--;
+	}
+	bv->bv_len -= nbytes;
 	return 0;
 }
+
+#ifdef CONFIG_DEBUG_KERNEL
+static inline bool bio_iov_bvec_aligned(const struct bio *bio,
+					unsigned mem_align_mask)
+{
+	struct bvec_iter iter;
+	struct bio_vec bv;
+
+	/*
+	 * Correct callers never break the alignment requirements, so this
+	 * exhaustive check is only paid for in debug builds.
+	 */
+	for_each_mp_bvec(bv, bio->bi_io_vec, iter, bio->bi_iter)
+		if ((bv.bv_offset | bv.bv_len) & mem_align_mask)
+			return false;
+	return true;
+}
+#else
+static inline bool bio_iov_bvec_aligned(const struct bio *bio,
+					unsigned mem_align_mask)
+{
+	/*
+	 * We forward the bio_vec as-is, so ITER_BVEC callers must provide
+	 * segments already aligned to the device's DMA alignment. The only
+	 * unchecked user-controllable offset that reaches here is an io_uring
+	 * registered buffer where just the first segment can be unaligned
+	 * (the rest is virtually contiguous), so checking only that one is
+	 * sufficient to know if the entire vector is valid.
+	 */
+	return !(mp_bvec_iter_offset(bio->bi_io_vec, bio->bi_iter) &
+							mem_align_mask);
+}
+#endif
 
 /**
  * bio_iov_iter_get_pages - add user or kernel pages to a bio
  * @bio: bio to add pages to
  * @iter: iov iterator describing the region to be added
+ * @mem_align_mask: the mask the source address and length must be aligned to,
+ *	0 for no requirement
  * @len_align_mask: the mask to align the total size to, 0 for any length
  *
  * This takes either an iterator pointing to user memory, or one pointing to
@@ -1245,7 +1281,7 @@ static int bio_iov_iter_align_down(struct bio *bio, struct iov_iter *iter,
  * is returned only if 0 pages could be pinned.
  */
 int bio_iov_iter_get_pages(struct bio *bio, struct iov_iter *iter,
-			   unsigned len_align_mask)
+			   unsigned mem_align_mask, unsigned len_align_mask)
 {
 	iov_iter_extraction_t flags = 0;
 
@@ -1254,6 +1290,10 @@ int bio_iov_iter_get_pages(struct bio *bio, struct iov_iter *iter,
 
 	if (iov_iter_is_bvec(iter)) {
 		bio_iov_bvec_set(bio, iter);
+
+		if (!bio_iov_bvec_aligned(bio, mem_align_mask))
+			return -EINVAL;
+
 		iov_iter_advance(iter, bio->bi_iter.bi_size);
 		return 0;
 	}
@@ -1268,8 +1308,19 @@ int bio_iov_iter_get_pages(struct bio *bio, struct iov_iter *iter,
 
 		ret = iov_iter_extract_bvecs(iter, bio->bi_io_vec,
 				BIO_MAX_SIZE - bio->bi_iter.bi_size,
-				&bio->bi_vcnt, bio->bi_max_vecs, flags);
+				&bio->bi_vcnt, bio->bi_max_vecs,
+				mem_align_mask, flags);
 		if (ret <= 0) {
+			/*
+			 * A misaligned vector fails the whole I/O.  Release any
+			 * pages pinned by earlier iterations before returning
+			 * since this bio won't be submitted to release them.
+			 */
+			if (ret == -EINVAL) {
+				bio_release_pages(bio, false);
+				bio_clear_flag(bio, BIO_PAGE_PINNED);
+				bio->bi_vcnt = 0;
+			}
 			if (!bio->bi_vcnt)
 				return ret;
 			break;
@@ -1279,7 +1330,8 @@ int bio_iov_iter_get_pages(struct bio *bio, struct iov_iter *iter,
 
 	if (is_pci_p2pdma_page(bio->bi_io_vec->bv_page))
 		bio->bi_opf |= REQ_NOMERGE;
-	return bio_iov_iter_align_down(bio, iter, len_align_mask);
+	return bio_iov_iter_align_down(bio, iter,
+			&bio->bi_io_vec[bio->bi_vcnt - 1], len_align_mask);
 }
 
 static struct folio *folio_alloc_greedy(gfp_t gfp, size_t *size,
@@ -1288,7 +1340,8 @@ static struct folio *folio_alloc_greedy(gfp_t gfp, size_t *size,
 	struct folio *folio;
 
 	while (*size > minsize) {
-		folio = folio_alloc(gfp | __GFP_NORETRY, get_order(*size));
+		folio = folio_alloc(gfp | __GFP_NORETRY | __GFP_NOWARN,
+				    get_order(*size));
 		if (folio)
 			return folio;
 		*size = rounddown_pow_of_two(*size - 1);
@@ -1305,7 +1358,7 @@ static void bio_free_folios(struct bio *bio)
 	bio_for_each_bvec_all(bv, bio, i) {
 		struct folio *folio = bvec_folio(bv);
 
-		if (!is_zero_folio(folio))
+		if (!is_zero_folio(folio) && !is_huge_zero_folio(folio))
 			folio_put(folio);
 	}
 }
@@ -1324,6 +1377,7 @@ static int bio_iov_iter_bounce_write(struct bio *bio, struct iov_iter *iter,
 
 	do {
 		size_t this_len = min(total_len, SZ_1M);
+		size_t copied;
 		struct folio *folio;
 
 		if (this_len > minsize * 2)
@@ -1337,18 +1391,33 @@ static int bio_iov_iter_bounce_write(struct bio *bio, struct iov_iter *iter,
 			break;
 		bio_add_folio_nofail(bio, folio, this_len, 0);
 
-		if (copy_from_iter(folio_address(folio), this_len, iter) !=
-				this_len) {
+		if (iter->nofault)
+			copied = copy_folio_from_iter_atomic(folio, 0, this_len,
+							     iter);
+		else
+			copied = copy_folio_from_iter(folio, 0, this_len, iter);
+		if (copied < this_len) {
+			/*
+			 * Need to revert the iov iter for all bytes we have
+			 * copied.
+			 *
+			 * However the bio size differs from the real copied
+			 * bytes as @this_len is queued but only advanced
+			 * less than that.
+			 * Need to compensate that for the revert.
+			 */
+			iov_iter_revert(iter, bio->bi_iter.bi_size - this_len +
+					copied);
 			bio_free_folios(bio);
 			return -EFAULT;
 		}
-
 		total_len -= this_len;
 	} while (total_len && bio->bi_vcnt < bio->bi_max_vecs);
 
 	if (!bio->bi_iter.bi_size)
 		return -ENOMEM;
-	return bio_iov_iter_align_down(bio, iter, minsize - 1);
+	return bio_iov_iter_align_down(bio, iter,
+			&bio->bi_io_vec[bio->bi_vcnt - 1], minsize - 1);
 }
 
 static int bio_iov_iter_bounce_read(struct bio *bio, struct iov_iter *iter,
@@ -1356,21 +1425,18 @@ static int bio_iov_iter_bounce_read(struct bio *bio, struct iov_iter *iter,
 {
 	size_t len = min3(iov_iter_count(iter), maxlen, SZ_1M);
 	struct folio *folio;
+	ssize_t ret;
 
 	folio = folio_alloc_greedy(GFP_KERNEL, &len, minsize);
 	if (!folio)
 		return -ENOMEM;
 
 	do {
-		ssize_t ret;
-
 		ret = iov_iter_extract_bvecs(iter, bio->bi_io_vec + 1, len,
-				&bio->bi_vcnt, bio->bi_max_vecs - 1, 0);
+				&bio->bi_vcnt, bio->bi_max_vecs - 1, 0, 0);
 		if (ret <= 0) {
-			if (!bio->bi_vcnt) {
-				folio_put(folio);
-				return ret;
-			}
+			if (!bio->bi_vcnt)
+				goto out_folio_put;
 			break;
 		}
 		len -= ret;
@@ -1386,7 +1452,20 @@ static int bio_iov_iter_bounce_read(struct bio *bio, struct iov_iter *iter,
 	bvec_set_folio(&bio->bi_io_vec[0], folio, bio->bi_iter.bi_size, 0);
 	if (iov_iter_extract_will_pin(iter))
 		bio_set_flag(bio, BIO_PAGE_PINNED);
-	return bio_iov_iter_align_down(bio, iter, minsize - 1);
+
+	/* The first vec stores the bounce buffer, so do not subtract 1 here. */
+	ret = bio_iov_iter_align_down(bio, iter,
+			&bio->bi_io_vec[bio->bi_vcnt], minsize - 1);
+	if (ret)
+		goto out_folio_put;
+
+	/* Update the bounc buffer bv_len to the aligned down size. */
+	bio->bi_io_vec[0].bv_len = bio->bi_iter.bi_size;
+	return 0;
+
+out_folio_put:
+	folio_put(folio);
+	return ret;
 }
 
 /**

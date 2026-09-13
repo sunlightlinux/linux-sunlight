@@ -1539,6 +1539,9 @@ struct task_struct {
 	/* KCOV descriptor wired with this task or NULL: */
 	struct kcov			*kcov;
 
+	/* KCOV descriptor for remote coverage collection from other tasks: */
+	struct kcov			*kcov_remote;
+
 	/* KCOV common handle for remote coverage collection: */
 	u64				kcov_handle;
 
@@ -1547,6 +1550,14 @@ struct task_struct {
 
 	/* Collect coverage from softirq context: */
 	unsigned int			kcov_softirq;
+
+	/* Temporary storage for preempting remote coverage collection: */
+	unsigned int			kcov_saved_mode;
+	unsigned int			kcov_saved_size;
+	void				*kcov_saved_area;
+	struct kcov			*kcov_saved_kcov;
+	int				kcov_saved_sequence;
+
 #endif
 
 #ifdef CONFIG_MEMCG_V1

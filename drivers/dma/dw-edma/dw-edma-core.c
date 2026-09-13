@@ -297,7 +297,8 @@ static int dw_edma_device_resume(struct dma_chan *dchan)
 		err = -EPERM;
 	} else {
 		chan->status = EDMA_ST_BUSY;
-		dw_edma_start_transfer(chan);
+		if (!dw_edma_start_transfer(chan))
+			chan->status = EDMA_ST_IDLE;
 	}
 
 	return err;
@@ -655,16 +656,28 @@ static void dw_edma_done_interrupt(struct dw_edma_chan *chan)
 	unsigned long flags;
 
 	spin_lock_irqsave(&chan->vc.lock, flags);
+	if (chan->status == EDMA_ST_PAUSE) {
+		spin_unlock_irqrestore(&chan->vc.lock, flags);
+		return;
+	}
+
 	vd = vchan_next_desc(&chan->vc);
 	if (vd) {
 		switch (chan->request) {
 		case EDMA_REQ_NONE:
+		case EDMA_REQ_PAUSE:
 			desc = vd2dw_edma_desc(vd);
 			if (!desc->chunks_alloc) {
 				dw_hdma_set_callback_result(vd,
 							    DMA_TRANS_NOERROR);
 				list_del(&vd->node);
 				vchan_cookie_complete(vd);
+			}
+
+			if (chan->request == EDMA_REQ_PAUSE) {
+				chan->request = EDMA_REQ_NONE;
+				chan->status = EDMA_ST_PAUSE;
+				break;
 			}
 
 			/* Continue transferring if there are remaining chunks or issued requests.
@@ -677,11 +690,6 @@ static void dw_edma_done_interrupt(struct dw_edma_chan *chan)
 			vchan_cookie_complete(vd);
 			chan->request = EDMA_REQ_NONE;
 			chan->status = EDMA_ST_IDLE;
-			break;
-
-		case EDMA_REQ_PAUSE:
-			chan->request = EDMA_REQ_NONE;
-			chan->status = EDMA_ST_PAUSE;
 			break;
 
 		default:
@@ -755,6 +763,7 @@ static int dw_edma_emul_irq_alloc(struct dw_edma *dw)
 		return virq;
 
 	irq_set_chip_and_handler(virq, &dw_edma_emul_irqchip, handle_level_irq);
+	irq_set_status_flags(virq, IRQ_LEVEL);
 	irq_set_chip_data(virq, dw);
 	irq_set_noprobe(virq);
 
@@ -929,7 +938,6 @@ static int dw_edma_channel_setup(struct dw_edma *dw, u32 wr_alloc, u32 rd_alloc)
 		else
 			irq->rd_mask |= BIT(chan->id);
 
-		irq->dw = dw;
 		memcpy(&chan->msi, &irq->msi, sizeof(chan->msi));
 
 		dev_vdbg(dev, "MSI:\t\tChannel %s[%u] addr=0x%.8x%.8x, data=0x%.8x\n",
@@ -988,20 +996,12 @@ static inline void dw_edma_dec_irq_alloc(int *nr_irqs, u32 *alloc, u16 cnt)
 	}
 }
 
-static inline void dw_edma_add_irq_mask(u32 *mask, u32 alloc, u16 cnt)
-{
-	while (*mask * alloc < cnt)
-		(*mask)++;
-}
-
 static int dw_edma_irq_request(struct dw_edma *dw,
 			       u32 *wr_alloc, u32 *rd_alloc)
 {
 	struct dw_edma_chip *chip = dw->chip;
 	struct device *dev = dw->chip->dev;
 	struct msi_desc *msi_desc;
-	u32 wr_mask = 1;
-	u32 rd_mask = 1;
 	int i, err = 0;
 	u32 ch_cnt;
 	int irq;
@@ -1018,6 +1018,7 @@ static int dw_edma_irq_request(struct dw_edma *dw,
 	if (chip->nr_irqs == 1) {
 		/* Common IRQ shared among all channels */
 		irq = chip->ops->irq_vector(dev, 0);
+		dw->irq[0].dw = dw;
 		err = request_irq(irq, dw_edma_interrupt_common,
 				  IRQF_SHARED, dw->name, &dw->irq[0]);
 		if (err) {
@@ -1038,11 +1039,9 @@ static int dw_edma_irq_request(struct dw_edma *dw,
 			dw_edma_dec_irq_alloc(&tmp, rd_alloc, dw->rd_ch_cnt);
 		}
 
-		dw_edma_add_irq_mask(&wr_mask, *wr_alloc, dw->wr_ch_cnt);
-		dw_edma_add_irq_mask(&rd_mask, *rd_alloc, dw->rd_ch_cnt);
-
 		for (i = 0; i < (*wr_alloc + *rd_alloc); i++) {
 			irq = chip->ops->irq_vector(dev, i);
+			dw->irq[i].dw = dw;
 			err = request_irq(irq,
 					  i < *wr_alloc ?
 						dw_edma_interrupt_write :

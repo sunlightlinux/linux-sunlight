@@ -84,11 +84,15 @@ core-flags := \
     --edition=$(core-edition) \
     $(call cfgs-to-flags,$(core-cfgs))
 
+zerocopy-cfgs := \
+    no_fp_fmt_parse
+
 zerocopy-flags := \
-    --cap-lints=allow
+    --cap-lints=allow \
+    $(call cfgs-to-flags,$(zerocopy-cfgs))
 
 zerocopy-envs := \
-    CARGO_PKG_VERSION=0.8.50
+    CARGO_PKG_VERSION=0.8.54
 
 proc_macro2-cfgs := \
     feature="proc-macro" \
@@ -128,11 +132,15 @@ syn-flags := \
     --extern quote \
     $(call cfgs-to-flags,$(syn-cfgs))
 
+zerocopy_derive-cfgs := \
+    zerocopy_unstable_linux
+
 zerocopy_derive-flags := \
     --cap-lints=allow \
     --extern proc_macro2 \
     --extern quote \
-    --extern syn
+    --extern syn \
+    $(call cfgs-to-flags,$(zerocopy_derive-cfgs))
 
 pin_init_internal-cfgs := \
     kernel USE_RUSTC_FEATURES
@@ -342,7 +350,8 @@ rusttestlib-pin_init: $(src)/pin-init/src/lib.rs rusttestlib-macros \
 rusttestlib-kernel: private rustc_target_flags = --extern ffi \
     --extern build_error --extern macros --extern pin_init \
     --extern bindings --extern uapi \
-    --extern zerocopy --extern zerocopy_derive
+    --extern zerocopy=$(objtree)/$(obj)/test/libzerocopy.rlib \
+    --extern zerocopy_derive=$(objtree)/$(obj)/test/$(libzerocopy_derive_name)
 rusttestlib-kernel: $(src)/kernel/lib.rs rusttestlib-bindings rusttestlib-uapi \
     rusttestlib-build_error rusttestlib-pin_init $(obj)/$(libmacros_name) \
     $(obj)/bindings.o rusttestlib-zerocopy rusttestlib-zerocopy_derive FORCE
@@ -636,7 +645,8 @@ quiet_cmd_rustc_library = $(if $(skip_clippy),RUSTC,$(RUSTC_OR_CLIPPY_QUIET)) L 
 		-Zunstable-options \
 	$(if $(link_helper),;$(LLVM_LINK) --internalize --suppress-warnings $(patsubst %.o,%.bc,$@) \
 		$(obj)/helpers/helpers$(if $(part-of-module),_module).bc -o $(patsubst %.o,%.m.bc,$@); \
-		$(CC) $(CLANG_FLAGS) $(KBUILD_CFLAGS) -Wno-override-module -c $(patsubst %.o,%.m.bc,$@) -o $@ \
+		$(CC) $(CLANG_FLAGS) $(filter-out $(CC_FLAGS_LTO),$(KBUILD_CFLAGS)) \
+		$(CC_FLAGS_RUST_INLINE_HELPERS) -Wno-override-module -c $(patsubst %.o,%.m.bc,$@) -o $@ \
 		$(cmd_ld_single)) \
 	$(if $(rustc_objcopy),;$(OBJCOPY) $(rustc_objcopy) $@) \
 	$(cmd_objtool)
@@ -644,9 +654,11 @@ quiet_cmd_rustc_library = $(if $(skip_clippy),RUSTC,$(RUSTC_OR_CLIPPY_QUIET)) L 
 rust-analyzer:
 	$(Q)MAKEFLAGS= $(srctree)/scripts/generate_rust_analyzer.py \
 		--cfgs='core=$(core-cfgs)' $(core-edition) \
+		--cfgs='zerocopy=$(zerocopy-cfgs)' \
 		--cfgs='proc_macro2=$(proc_macro2-cfgs)' \
 		--cfgs='quote=$(quote-cfgs)' \
 		--cfgs='syn=$(syn-cfgs)' \
+		--cfgs='zerocopy_derive=$(zerocopy_derive-cfgs)' \
 		--cfgs='pin_init_internal=$(pin_init_internal-cfgs)' \
 		--cfgs='pin_init=$(pin_init-cfgs)' \
 		--envs='zerocopy=$(zerocopy-envs)' \

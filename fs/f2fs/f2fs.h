@@ -96,6 +96,15 @@ extern const char *f2fs_fault_name[FAULT_MAX];
 #define DEFAULT_FAILURE_RETRY_COUNT		1
 #endif
 
+enum {
+	REPORT_FAULT_NEED_FSCK,
+	REPORT_FAULT_STOP_CP,
+	REPORT_FAULT_MAX,
+};
+
+void f2fs_fault_report(struct super_block *sb, unsigned int err_code,
+			const char *func, unsigned int data);
+
 /*
  * For mount options
  */
@@ -1583,6 +1592,7 @@ enum node_type {
 	NODE_TYPE_INODE,
 	NODE_TYPE_XATTR,
 	NODE_TYPE_NON_INODE,
+	NODE_TYPE_NON_IXNODE,	/* non inode and xnode */
 };
 
 /* a threshold of maximum elapsed time in critical region to print tracepoint */
@@ -1738,6 +1748,33 @@ struct decompress_io_ctx {
 #define MAX_COMPRESS_LOG_SIZE		8
 #define MAX_COMPRESS_WINDOW_SIZE(log_size)	((PAGE_SIZE) << (log_size))
 
+struct f2fs_gc_kthread {
+	struct task_struct *f2fs_gc_task;
+	wait_queue_head_t gc_wait_queue_head;
+
+	/* for gc sleep time */
+	unsigned int urgent_sleep_time;
+	unsigned int min_sleep_time;
+	unsigned int max_sleep_time;
+	unsigned int no_gc_sleep_time;
+
+	/* for changing gc mode */
+	bool gc_wake;
+
+	/* for GC_MERGE mount option */
+	wait_queue_head_t fggc_wq;		/*
+						 * caller of f2fs_balance_fs()
+						 * will wait on this wait queue.
+						 */
+
+	/* for gc control for zoned devices */
+	unsigned int no_zoned_gc_percent;
+	unsigned int boost_zoned_gc_percent;
+	unsigned int valid_thresh_ratio;
+	unsigned int boost_gc_multiple;
+	unsigned int boost_gc_greedy;
+};
+
 struct f2fs_sb_info {
 	struct super_block *sb;			/* pointer to VFS super block */
 	struct proc_dir_entry *s_proc;		/* proc entry */
@@ -1873,7 +1910,7 @@ struct f2fs_sb_info {
 						 * semaphore for GC, avoid
 						 * race between GC and GC or CP
 						 */
-	struct f2fs_gc_kthread	*gc_thread;	/* GC thread */
+	struct f2fs_gc_kthread gc_thread;	/* GC thread */
 	struct atgc_management am;		/* atgc management */
 	unsigned int cur_victim_sec;		/* current victim section num */
 	unsigned int gc_mode;			/* current GC state */
@@ -1969,7 +2006,7 @@ struct f2fs_sb_info {
 	/* Precomputed FS UUID checksum for seeding other checksums */
 	__u32 s_chksum_seed;
 
-	struct workqueue_struct *post_read_wq;	/* post read workqueue */
+	struct workqueue_struct *wq;		/* bio completion workqueue */
 
 	/*
 	 * If we are in irq context, let's update error information into
@@ -1980,6 +2017,7 @@ struct f2fs_sb_info {
 	unsigned char stop_reason[MAX_STOP_REASON];	/* stop reason */
 	spinlock_t error_lock;			/* protect errors/stop_reason array */
 	bool error_dirty;			/* errors of sb is dirty */
+	bool stop_reason_dirty;			/* stop reason of sb is dirty */
 
 	/* For reclaimed segs statistics per each GC mode */
 	unsigned int gc_segment_mode;		/* GC state for reclaimed segments */
@@ -2125,12 +2163,12 @@ static inline void f2fs_update_time(struct f2fs_sb_info *sbi, int type)
 {
 	unsigned long now = jiffies;
 
-	sbi->last_time[type] = now;
+	WRITE_ONCE(sbi->last_time[type], now);
 
 	/* DISCARD_TIME and GC_TIME are based on REQ_TIME */
 	if (type == REQ_TIME) {
-		sbi->last_time[DISCARD_TIME] = now;
-		sbi->last_time[GC_TIME] = now;
+		WRITE_ONCE(sbi->last_time[DISCARD_TIME], now);
+		WRITE_ONCE(sbi->last_time[GC_TIME], now);
 	}
 }
 
@@ -2138,7 +2176,7 @@ static inline bool f2fs_time_over(struct f2fs_sb_info *sbi, int type)
 {
 	unsigned long interval = sbi->interval_time[type] * HZ;
 
-	return time_after(jiffies, sbi->last_time[type] + interval);
+	return time_after(jiffies, READ_ONCE(sbi->last_time[type]) + interval);
 }
 
 static inline unsigned int f2fs_time_to_wait(struct f2fs_sb_info *sbi,
@@ -2148,7 +2186,7 @@ static inline unsigned int f2fs_time_to_wait(struct f2fs_sb_info *sbi,
 	unsigned int wait_ms = 0;
 	long delta;
 
-	delta = (sbi->last_time[type] + interval) - jiffies;
+	delta = (READ_ONCE(sbi->last_time[type]) + interval) - jiffies;
 	if (delta > 0)
 		wait_ms = jiffies_to_msecs(delta);
 
@@ -2279,10 +2317,17 @@ static inline bool is_sbi_flag_set(struct f2fs_sb_info *sbi, unsigned int type)
 	return test_bit(type, &sbi->s_flag);
 }
 
-static inline void set_sbi_flag(struct f2fs_sb_info *sbi, unsigned int type)
+static inline void __set_sbi_flag(struct f2fs_sb_info *sbi, unsigned int type)
 {
 	set_bit(type, &sbi->s_flag);
 }
+
+#define set_sbi_flag(sbi, type)				\
+do {							\
+	__set_sbi_flag(sbi, type);			\
+	if ((type) == SBI_NEED_FSCK)			\
+		f2fs_fault_report(sbi->sb, REPORT_FAULT_NEED_FSCK, __func__, __LINE__);	\
+} while (0)
 
 static inline void clear_sbi_flag(struct f2fs_sb_info *sbi, unsigned int type)
 {
@@ -4061,6 +4106,8 @@ void f2fs_destroy_segment_manager_caches(void);
 int f2fs_rw_hint_to_seg_type(struct f2fs_sb_info *sbi, enum rw_hint hint);
 enum rw_hint f2fs_io_type_to_rw_hint(struct f2fs_sb_info *sbi,
 			enum page_type type, enum temp_type temp);
+u8 f2fs_io_type_to_write_stream(struct block_device *bdev,
+				enum page_type type, enum temp_type temp);
 unsigned int f2fs_usable_segs_in_sec(struct f2fs_sb_info *sbi);
 unsigned int f2fs_usable_blks_in_seg(struct f2fs_sb_info *sbi,
 			unsigned int segno);
@@ -4153,6 +4200,7 @@ void f2fs_submit_merged_write_folio(struct f2fs_sb_info *sbi,
 				struct folio *folio, enum page_type type);
 void f2fs_submit_merged_ipu_write(struct f2fs_sb_info *sbi,
 					struct bio **bio, struct folio *folio);
+void f2fs_submit_all_merged_ipu_writes(struct f2fs_sb_info *sbi);
 void f2fs_flush_merged_writes(struct f2fs_sb_info *sbi);
 int f2fs_submit_page_bio(struct f2fs_io_info *fio);
 int f2fs_merge_page_bio(struct f2fs_io_info *fio);
@@ -4193,8 +4241,8 @@ bool f2fs_overwrite_io(struct inode *inode, loff_t pos, size_t len);
 void f2fs_clear_page_cache_dirty_tag(struct folio *folio);
 int f2fs_init_post_read_processing(void);
 void f2fs_destroy_post_read_processing(void);
-int f2fs_init_post_read_wq(struct f2fs_sb_info *sbi);
-void f2fs_destroy_post_read_wq(struct f2fs_sb_info *sbi);
+int f2fs_init_wq(struct f2fs_sb_info *sbi);
+void f2fs_destroy_wq(struct f2fs_sb_info *sbi);
 extern const struct iomap_ops f2fs_iomap_ops;
 
 /*

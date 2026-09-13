@@ -342,8 +342,8 @@ static __meminit struct page *vmemmap_get_tail(unsigned int order, struct zone *
 	 *
 	 * Any initialization done here will be overwritten by memmap_init().
 	 *
-	 * hugetlb_vmemmap_init() will take care of initialization after
-	 * memmap_init().
+	 * hugetlb_bootmem_struct_page_init() will take care of initialization
+	 * after memmap_init().
 	 */
 
 	p = vmemmap_alloc_block_zero(PAGE_SIZE, node);
@@ -563,6 +563,8 @@ struct page * __meminit __populate_section_memmap(unsigned long pfn,
 
 	if (r < 0)
 		return NULL;
+
+	flush_cache_vmap(start, end);
 
 	return pfn_to_page(pfn);
 }

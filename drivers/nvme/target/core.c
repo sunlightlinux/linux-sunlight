@@ -944,7 +944,7 @@ u16 nvmet_sq_create(struct nvmet_ctrl *ctrl, struct nvmet_sq *sq,
 
 	status = nvmet_check_sqid(ctrl, sqid, true);
 	if (status != NVME_SC_SUCCESS)
-		return status;
+		goto ctrl_put;
 
 	ret = nvmet_sq_init(sq, cq);
 	if (ret) {
@@ -977,7 +977,7 @@ void nvmet_sq_destroy(struct nvmet_sq *sq)
 	wait_for_completion(&sq->confirm_done);
 	wait_for_completion(&sq->free_done);
 	percpu_ref_exit(&sq->ref);
-	nvmet_auth_sq_free(sq);
+	nvmet_auth_sq_destroy(sq);
 	nvmet_cq_put(sq->cq);
 
 	/*

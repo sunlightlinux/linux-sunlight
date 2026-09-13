@@ -40,9 +40,11 @@ static struct reparse_data_buffer *reparse_buf_ptr(struct kvec *iov)
 
 	buf = (struct reparse_data_buffer *)((u8 *)io + off);
 	len = sizeof(*buf);
-	rdlen = le16_to_cpu(buf->ReparseDataLength);
+	if (count < len)
+		return ERR_PTR(smb_EIO2(smb_eio_trace_reparse_rdlen, count, 0));
 
-	if (count < len || count < rdlen + len)
+	rdlen = le16_to_cpu(buf->ReparseDataLength);
+	if (count < rdlen + len)
 		return ERR_PTR(smb_EIO2(smb_eio_trace_reparse_rdlen, count, rdlen));
 	return buf;
 }
@@ -792,9 +794,19 @@ static int parse_create_response(struct cifs_open_info_data *data,
 		rc = smb2_parse_symlink_response(cifs_sb, iov,
 						 full_path,
 						 &data->symlink_target);
-		if (rc)
+		if (rc != 0 && rc != -ENODATA)
 			return rc;
-		tag = IO_REPARSE_TAG_SYMLINK;
+		/*
+		 * -ENODATA means that the response was parsed but did not contain
+		 * the symlink target at all (see symlink_data()).  Treat it like
+		 * STATUS_IO_REPARSE_TAG_NOT_HANDLED, which does not contain it
+		 * either: leave the tag unset and clear rc, so that the caller
+		 * retrieves the target with SMB2_OP_GET_REPARSE.
+		 */
+		if (rc == -ENODATA)
+			rc = 0;
+		else
+			tag = IO_REPARSE_TAG_SYMLINK;
 		reparse_point = true;
 		break;
 	case STATUS_SUCCESS:
@@ -987,7 +999,14 @@ int smb2_query_path_info(const unsigned int xid,
 				rc = -EOPNOTSUPP;
 		}
 
-		if (data->reparse.tag == IO_REPARSE_TAG_SYMLINK && !rc) {
+		/*
+		 * If the symlink was already parsed in create response then it is needed to fix
+		 * its type now (after the second call with OPEN_REPARSE_POINT which filled the
+		 * data->fi.Attributes). If the symlink was not parsed in create response then
+		 * the data->symlink_target was not filled yet and then the type will be fixed
+		 * later after data->symlink_target is filled.
+		 */
+		if (data->reparse.tag == IO_REPARSE_TAG_SYMLINK && !rc && data->symlink_target) {
 			bool directory = le32_to_cpu(data->fi.Attributes) & ATTR_DIRECTORY;
 			rc = smb2_fix_symlink_target_type(&data->symlink_target, directory, cifs_sb);
 		}

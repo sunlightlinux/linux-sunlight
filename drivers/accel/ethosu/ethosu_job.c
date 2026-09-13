@@ -152,6 +152,13 @@ static void ethosu_job_err_cleanup(struct ethosu_job *job)
 
 	drm_gem_object_put(job->cmd_bo);
 
+	if (job->done_fence) {
+		if (dma_fence_was_initialized(job->done_fence))
+			dma_fence_put(job->done_fence);
+		else
+			dma_fence_free(job->done_fence);
+	}
+
 	kfree(job);
 }
 
@@ -162,7 +169,6 @@ static void ethosu_job_cleanup(struct kref *ref)
 
 	pm_runtime_put_autosuspend(job->dev->base.dev);
 
-	dma_fence_put(job->done_fence);
 	dma_fence_put(job->inference_done_fence);
 
 	ethosu_job_err_cleanup(job);
@@ -296,6 +302,7 @@ int ethosu_job_init(struct ethosu_device *edev)
 	struct device *dev = edev->base.dev;
 	struct drm_sched_init_args args = {
 		.ops = &ethosu_sched_ops,
+		.num_rqs = DRM_SCHED_PRIORITY_COUNT,
 		.credit_limit = 1,
 		.timeout = msecs_to_jiffies(JOB_TIMEOUT_MS),
 		.name = dev_name(dev),
@@ -392,7 +399,7 @@ static int ethosu_ioctl_submit_job(struct drm_device *dev, struct drm_file *file
 	ejob->done_fence = kzalloc_obj(*ejob->done_fence);
 	if (!ejob->done_fence) {
 		ret = -ENOMEM;
-		goto out_cleanup_job;
+		goto out_put_job;
 	}
 
 	ret = drm_sched_job_init(&ejob->base,

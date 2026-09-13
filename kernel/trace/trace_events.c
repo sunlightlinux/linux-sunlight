@@ -945,7 +945,7 @@ static int remove_cache_mod(struct trace_array *tr, const char *mod,
 		if (strcmp(event_mod->module, mod) != 0)
 			continue;
 
-		if (match && strcmp(event_mod->match, match) != 0)
+		if (match && (!event_mod->match || strcmp(event_mod->match, match) != 0))
 			continue;
 
 		if (system &&
@@ -1350,7 +1350,9 @@ __ftrace_set_clr_event_nolock(struct trace_array *tr, const char *match,
 		call = file->event_call;
 
 		/* If a module is specified, skip events that are not that module */
-		if (module && (!call->module || strcmp(module_name(call->module), module)))
+		if (module &&
+		    ((call->flags & TRACE_EVENT_FL_DYNAMIC) ||
+		     !call->module || strcmp(module_name(call->module), module)))
 			continue;
 
 		name = trace_event_name(call);
@@ -2652,14 +2654,14 @@ static const struct file_operations ftrace_show_event_filters_fops = {
 	.open = ftrace_event_show_filters_open,
 	.read = seq_read,
 	.llseek = seq_lseek,
-	.release = seq_release,
+	.release = ftrace_event_release,
 };
 
 static const struct file_operations ftrace_show_event_triggers_fops = {
 	.open = ftrace_event_show_triggers_open,
 	.read = seq_read,
 	.llseek = seq_lseek,
-	.release = seq_release,
+	.release = ftrace_event_release,
 };
 
 static const struct file_operations ftrace_set_event_pid_fops = {
@@ -2817,7 +2819,17 @@ ftrace_event_set_open(struct inode *inode, struct file *file)
 static int
 ftrace_event_show_filters_open(struct inode *inode, struct file *file)
 {
-	return ftrace_event_open(inode, file, &show_show_event_filters_seq_ops);
+	struct trace_array *tr = inode->i_private;
+	int ret;
+
+	ret = tracing_check_open_get_tr(tr);
+	if (ret)
+		return ret;
+
+	ret = ftrace_event_open(inode, file, &show_show_event_filters_seq_ops);
+	if (ret < 0)
+		trace_array_put(tr);
+	return ret;
 }
 
 /**
@@ -2831,7 +2843,17 @@ ftrace_event_show_filters_open(struct inode *inode, struct file *file)
 static int
 ftrace_event_show_triggers_open(struct inode *inode, struct file *file)
 {
-	return ftrace_event_open(inode, file, &show_show_event_triggers_seq_ops);
+	struct trace_array *tr = inode->i_private;
+	int ret;
+
+	ret = tracing_check_open_get_tr(tr);
+	if (ret)
+		return ret;
+
+	ret = ftrace_event_open(inode, file, &show_show_event_triggers_seq_ops);
+	if (ret < 0)
+		trace_array_put(tr);
+	return ret;
 }
 
 static int
@@ -3564,6 +3586,7 @@ void trace_event_update_all(struct trace_eval_map **map, int len)
 	int last_i;
 	int i;
 
+	mutex_lock(&event_mutex);
 	down_write(&trace_event_sem);
 	list_for_each_entry_safe(call, p, &ftrace_events, list) {
 		/* events are usually grouped together with systems */
@@ -3602,6 +3625,7 @@ void trace_event_update_all(struct trace_eval_map **map, int len)
 		cond_resched();
 	}
 	up_write(&trace_event_sem);
+	mutex_unlock(&event_mutex);
 }
 
 static bool event_in_systems(struct trace_event_call *call,
@@ -3931,8 +3955,8 @@ static void trace_module_add_events(struct module *mod)
 	end = mod->trace_events + mod->num_trace_events;
 
 	for_each_event(call, start, end) {
-		__register_event(*call, mod);
-		__add_event_to_tracers(*call);
+		if (!__register_event(*call, mod))
+			__add_event_to_tracers(*call);
 	}
 
 	update_cache_events(mod);
@@ -4897,6 +4921,8 @@ static __init void event_test_stuff(void)
 	struct task_struct *test_thread;
 
 	test_thread = kthread_run(event_test_thread, NULL, "test-events");
+	if (WARN_ON(IS_ERR(test_thread)))
+		return;
 	msleep(1);
 	kthread_stop(test_thread);
 }

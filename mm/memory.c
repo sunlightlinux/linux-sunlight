@@ -1982,7 +1982,7 @@ retry:
 
 	if (can_reclaim_pt) {
 		if (direct_reclaim || zap_pte_table_if_empty(mm, pmd, start, &pmdval)) {
-			pte_free_tlb(tlb, pmd_pgtable(pmdval), addr);
+			pte_free_tlb(tlb, pmd_pgtable(pmdval), start);
 			mm_dec_nr_ptes(mm);
 		}
 	}
@@ -4387,7 +4387,7 @@ void unmap_mapping_folio(struct folio *folio)
 	details.zap_flags = ZAP_FLAG_DROP_MARKER;
 
 	i_mmap_lock_read(mapping);
-	if (unlikely(!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root)))
+	if (unlikely(mapping_mapped(mapping)))
 		unmap_mapping_range_tree(&mapping->i_mmap, first_index,
 					 last_index, &details);
 	i_mmap_unlock_read(mapping);
@@ -4417,7 +4417,7 @@ void unmap_mapping_pages(struct address_space *mapping, pgoff_t start,
 		last_index = ULONG_MAX;
 
 	i_mmap_lock_read(mapping);
-	if (unlikely(!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root)))
+	if (unlikely(mapping_mapped(mapping)))
 		unmap_mapping_range_tree(&mapping->i_mmap, first_index,
 					 last_index, &details);
 	i_mmap_unlock_read(mapping);

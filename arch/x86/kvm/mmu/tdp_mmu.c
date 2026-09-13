@@ -1334,19 +1334,17 @@ static void kvm_tdp_mmu_age_spte(struct kvm *kvm, struct tdp_iter *iter)
 	if (WARN_ON_ONCE(is_mirror_sptep(iter->sptep)))
 		return;
 
-	if (spte_ad_enabled(iter->old_spte)) {
-		iter->old_spte = tdp_mmu_clear_spte_bits_atomic(iter->sptep,
-								shadow_accessed_mask);
+	if (spte_ad_enabled(iter->old_spte))
 		new_spte = iter->old_spte & ~shadow_accessed_mask;
-	} else {
+	else
 		new_spte = mark_spte_for_access_track(iter->old_spte);
-		/*
-		 * It is safe for the following cmpxchg to fail. Leave the
-		 * Accessed bit set, as the spte is most likely young anyway.
-		 */
-		if (__tdp_mmu_set_spte_atomic(kvm, iter, new_spte))
-			return;
-	}
+
+	/*
+	 * Don't bother retrying if another CPU modified the SPTE, the SPTE is
+	 * either being zapped or is likely still in-use, i.e. is still young.
+	 */
+	if (__tdp_mmu_set_spte_atomic(kvm, iter, new_spte))
+		return;
 
 	trace_kvm_tdp_mmu_spte_changed(iter->as_id, iter->gfn, iter->level,
 				       iter->old_spte, new_spte);
@@ -1410,9 +1408,10 @@ static bool wrprot_gfn_range(struct kvm *kvm, struct kvm_mmu_page *root,
 	u64 new_spte;
 	bool spte_set = false;
 
-	rcu_read_lock();
+	if (KVM_BUG_ON(min_level > KVM_MAX_HUGEPAGE_LEVEL, kvm))
+		return false;
 
-	BUG_ON(min_level > KVM_MAX_HUGEPAGE_LEVEL);
+	rcu_read_lock();
 
 	for_each_tdp_pte_min_level(iter, kvm, root, min_level, start, end) {
 retry:
@@ -1844,7 +1843,8 @@ static bool write_protect_gfn(struct kvm *kvm, struct kvm_mmu_page *root,
 	u64 new_spte;
 	bool spte_set = false;
 
-	BUG_ON(min_level > KVM_MAX_HUGEPAGE_LEVEL);
+	if (KVM_BUG_ON(min_level > KVM_MAX_HUGEPAGE_LEVEL, kvm))
+		return false;
 
 	rcu_read_lock();
 

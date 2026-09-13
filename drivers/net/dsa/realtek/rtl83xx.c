@@ -156,9 +156,17 @@ rtl83xx_probe(struct device *dev,
 	if (!priv)
 		return ERR_PTR(-ENOMEM);
 
-	mutex_init(&priv->map_lock);
-	mutex_init(&priv->vlan_lock);
-	mutex_init(&priv->l2_lock);
+	ret = devm_mutex_init(dev, &priv->map_lock);
+	if (ret)
+		return ERR_PTR(ret);
+
+	ret = devm_mutex_init(dev, &priv->vlan_lock);
+	if (ret)
+		return ERR_PTR(ret);
+
+	ret = devm_mutex_init(dev, &priv->l2_lock);
+	if (ret)
+		return ERR_PTR(ret);
 
 	rc.lock_arg = priv;
 	priv->map = devm_regmap_init(dev, NULL, priv, &rc);
@@ -313,7 +321,7 @@ void rtl83xx_reset_assert(struct realtek_priv *priv)
 			 "Failed to assert the switch reset control: %pe\n",
 			 ERR_PTR(ret));
 
-	gpiod_set_value(priv->reset, true);
+	gpiod_set_value_cansleep(priv->reset, true);
 }
 
 void rtl83xx_reset_deassert(struct realtek_priv *priv)
@@ -326,7 +334,7 @@ void rtl83xx_reset_deassert(struct realtek_priv *priv)
 			 "Failed to deassert the switch reset control: %pe\n",
 			 ERR_PTR(ret));
 
-	gpiod_set_value(priv->reset, false);
+	gpiod_set_value_cansleep(priv->reset, false);
 }
 
 /**

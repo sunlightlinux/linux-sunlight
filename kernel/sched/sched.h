@@ -792,7 +792,6 @@ enum scx_rq_flags {
 	 */
 	SCX_RQ_ONLINE		= 1 << 0,
 	SCX_RQ_CAN_STOP_TICK	= 1 << 1,
-	SCX_RQ_BAL_KEEP		= 1 << 3, /* balance decided to keep current */
 	SCX_RQ_CLK_VALID	= 1 << 5, /* RQ clock is fresh and valid */
 	SCX_RQ_BAL_CB_PENDING	= 1 << 6, /* must queue a cb after dispatching */
 
@@ -812,6 +811,9 @@ struct scx_rq {
 	bool			cpu_released;
 	u32			flags;
 	u32			nr_immed;		/* ENQ_IMMED tasks on local_dsq */
+#ifdef CONFIG_SCHED_CORE
+	u32			lock_drop_seq;	/* nr dispatch lock releases */
+#endif
 	u64			clock;			/* current per-rq clock -- see scx_bpf_now() */
 	cpumask_var_t		cpus_to_kick;
 	cpumask_var_t		cpus_to_kick_if_idle;
@@ -1367,6 +1369,7 @@ struct rq {
 	unsigned int		core_forceidle_seq;
 	unsigned int		core_forceidle_occupation;
 	u64			core_forceidle_start;
+	unsigned int		core_pick_in_flight;
 #endif /* CONFIG_SCHED_CORE */
 
 	/* Scratch cpumask to be temporarily used under rq_lock */
@@ -4231,6 +4234,6 @@ DEFINE_CLASS(sched_change, struct sched_change_ctx *,
 
 DEFINE_CLASS_IS_UNCONDITIONAL(sched_change)
 
-#include "ext.h"
+#include "ext/ext.h"
 
 #endif /* _KERNEL_SCHED_SCHED_H */

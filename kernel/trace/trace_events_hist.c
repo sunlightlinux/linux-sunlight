@@ -6349,6 +6349,7 @@ static void event_hist_trigger_free(struct event_trigger_data *data)
 
 		trigger_data_free(data);
 
+		tracepoint_synchronize_unregister();
 		remove_hist_vars(hist_data);
 
 		unregister_field_var_hists(hist_data);
@@ -6388,6 +6389,7 @@ static void event_hist_trigger_named_free(struct event_trigger_data *data)
 
 		del_named_trigger(data);
 		trigger_data_free(data);
+		tracepoint_synchronize_unregister();
 		kfree(cmd_ops);
 	}
 }
@@ -6639,8 +6641,10 @@ static int hist_register_trigger(char *glob,
 		tracing_set_filter_buffering(file->tr, true);
 	}
 
-	if (named_data)
+	if (named_data) {
+		remove_hist_vars(hist_data);
 		destroy_hist_data(hist_data);
+	}
  out:
 	return ret;
 }
