@@ -70,7 +70,7 @@ CONFIG_ARM64_PSEUDO_NMI=y
 CONFIG_RANDOMIZE_BASE=y
 # CONFIG_RANDOMIZE_MODULE_REGION_FULL is not set
 CONFIG_UNWIND_PATCH_PAC_INTO_SCS=y
-CONFIG_CMDLINE="console=ttynull stack_depot_disable=on cgroup_disable=pressure kasan.stacktrace=off kvm-arm.mode=protected bootconfig ioremap_guard"
+CONFIG_CMDLINE="console=ttynull stack_depot_disable=on cgroup_disable=pressure kasan.stacktrace=off kvm-arm.mode=protected bootconfig ioremap_guard arm64.no32bit_el0"
 # CONFIG_DMI is not set
 CONFIG_HIBERNATION=y
 CONFIG_PM_USERSPACE_AUTOSLEEP=y
@@ -454,6 +454,7 @@ CONFIG_SPI_SLAVE=y
 # CONFIG_SPMI_MSM_PMIC_ARB is not set
 CONFIG_PTP_1588_CLOCK=m
 # CONFIG_PTP_1588_CLOCK_VMCLOCK is not set
+# CONFIG_PINCTRL_MSM is not set
 # CONFIG_PINCTRL_SUN8I_H3_R is not set
 # CONFIG_PINCTRL_SUN50I_A64 is not set
 # CONFIG_PINCTRL_SUN50I_A64_R is not set
@@ -466,6 +467,8 @@ CONFIG_PTP_1588_CLOCK=m
 # CONFIG_PINCTRL_SUN50I_H616_R is not set
 # CONFIG_PINCTRL_SUN55I_A523 is not set
 # CONFIG_PINCTRL_SUN55I_A523_R is not set
+# CONFIG_PINCTRL_TEGRA238 is not set
+# CONFIG_PINCTRL_TEGRA264 is not set
 CONFIG_GPIO_GENERIC_PLATFORM=y
 # CONFIG_GPIO_TEGRA is not set
 # CONFIG_GPIO_TEGRA186 is not set
