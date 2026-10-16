@@ -1038,8 +1038,13 @@ static void tick_nohz_full_stop_tick(struct tick_sched *ts, int cpu)
 
 static void tick_nohz_restart_sched_tick(struct tick_sched *ts, ktime_t now)
 {
-	/* Update jiffies first */
-	tick_do_update_jiffies64(now);
+	/*
+	 * Update jiffies first. On a nohz_full CPU the timekeeper keeps its
+	 * tick alive (see can_stop_idle_tick()), so leave the update to it.
+	 */
+	if (!tick_nohz_full_cpu(smp_processor_id()) ||
+	    READ_ONCE(tick_do_timer_cpu) == smp_processor_id())
+		tick_do_update_jiffies64(now);
 
 	/*
 	 * Clear the timer idle flag, so we avoid IPIs on remote queueing and
