@@ -1298,6 +1298,7 @@ static DECLARE_DELAYED_WORK(tsc_irqwork, tsc_refine_calibration_work);
 static void tsc_refine_calibration_work(struct work_struct *work)
 {
 	static u64 tsc_start = ULLONG_MAX, ref_start;
+	static bool retried;
 	static int hpet;
 	u64 tsc_stop, ref_stop, delta;
 	unsigned long freq;
@@ -1363,6 +1364,18 @@ restart:
 	/* Make sure we're within 1% */
 	if (abs(tsc_khz - freq) > tsc_khz/100)
 		goto out;
+
+	/*
+	 * The early calibration is usually within 500ppm. A larger deviation
+	 * hints at a disturbed reference readout, which the clocksource
+	 * watchdog will flag as frequency skew later. Retry once.
+	 */
+	if (abs(tsc_khz - freq) > (tsc_khz >> 10) && !retried) {
+		pr_info("Refined TSC calibration %lu.%03lu MHz deviates from early calibration, retrying\n",
+			freq / 1000, freq % 1000);
+		retried = true;
+		goto restart;
+	}
 
 	tsc_khz = freq;
 	pr_info("Refined TSC clocksource calibration: %lu.%03lu MHz\n",
