@@ -513,6 +513,7 @@ static bool watchdog_check_freq(struct clocksource *cs, bool reset_pending)
 		if (abs(wd_delta - cs_delta) < (max_delta >> ppm_shift) + wd_seq)
 			return true;
 
+		watchdog_data.wd_seq = wd_seq;
 		watchdog_data.result = WD_FREQ_SKEWED;
 		return false;
 	}
@@ -522,6 +523,7 @@ static bool watchdog_check_freq(struct clocksource *cs, bool reset_pending)
 
 reset:
 	cs->flags |= CLOCK_SOURCE_WATCHDOG;
+	cs->wd_skewed = false;
 	watchdog_data.result = WD_FREQ_RESET;
 	return false;
 }
@@ -585,6 +587,25 @@ static void watchdog_print_freq_skew(struct clocksource *cs)
 	pr_warn("Clocksource %20s interval: %16lluns\n", cs->name, watchdog_data.cs_delta);
 }
 
+/*
+ * A single skewed interval can be caused by a transient disturbance of
+ * either counter. The reference timestamps were already advanced to the
+ * current readout, so the next interval is an independent measurement.
+ * Only a skew which is seen in two consecutive intervals is a real
+ * frequency mismatch.
+ */
+static bool watchdog_confirm_freq_skew(struct clocksource *cs)
+{
+	if (cs->wd_skewed)
+		return true;
+
+	cs->wd_skewed = true;
+	pr_info("Clocksource %s frequency skew against %s, rechecking: %lluns vs. %lluns, readout %lluns\n",
+		cs->name, watchdog->name, watchdog_data.cs_delta, watchdog_data.wd_delta,
+		watchdog_data.wd_seq);
+	return false;
+}
+
 static void watchdog_handle_remote_timeout(struct clocksource *cs)
 {
 	pr_info_once("Watchdog remote CPU %u read timed out\n", watchdog_data.curr_cpu);
@@ -606,6 +627,7 @@ static void watchdog_check_result(struct clocksource *cs)
 {
 	switch (watchdog_data.result) {
 	case WD_SUCCESS:
+		cs->wd_skewed = false;
 		clocksource_tick_stable(cs);
 		clocksource_enable_highres(cs);
 		return;
@@ -625,6 +647,8 @@ static void watchdog_check_result(struct clocksource *cs)
 		return;
 
 	case WD_FREQ_SKEWED:
+		if (!watchdog_confirm_freq_skew(cs))
+			return;
 		watchdog_print_freq_skew(cs);
 		break;
 
