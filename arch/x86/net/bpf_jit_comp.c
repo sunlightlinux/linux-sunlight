@@ -1473,17 +1473,20 @@ static int emit_atomic_ld_st_index(u8 **pprog, u32 atomic_op, u32 size,
  *
  * Bit layout of `fixup` (32-bit):
  *
- * +-----------+--------+-----------+---------+----------+
- * | 31        | 30-24  |   23-16   |   15-8  |    7-0   |
- * |           |        |           |         |          |
- * | ARENA_ACC | Unused | ARENA_REG | DST_REG | INSN_LEN |
- * +-----------+--------+-----------+---------+----------+
+ * +-----------+-------------+--------+-----------+---------+----------+
+ * | 31        | 30          | 29-24  |   23-16   |   15-8  |    7-0   |
+ * |           |             |        |           |         |          |
+ * | ARENA_ACC | ARENA_WRITE | Unused | ARENA_REG | DST_REG | INSN_LEN |
+ * +-----------+-------------+--------+-----------+---------+----------+
  *
  * - INSN_LEN (8 bits): Length of faulting insn (max x86 insn = 15 bytes (fits in 8 bits)).
  * - DST_REG  (8 bits): Offset of dst_reg from reg2pt_regs[] (max offset = 112 (fits in 8 bits)).
- *                      This is set to DONT_CLEAR if the insn is a store.
+ *                      This is set to DONT_CLEAR if the insn does not read into a register.
  * - ARENA_REG (8 bits): Offset of the register that is used to calculate the
  *                       address for load/store when accessing the arena region.
+ * - ARENA_WRITE (1 bit): This bit is set when the faulting instruction wrote to the arena region.
+ *                        It is independent of DST_REG, since a read-modify-write both writes to
+ *                        memory and reads the old value into a register.
  * - ARENA_ACCESS (1 bit): This bit is set when the faulting instruction accessed the arena region.
  *
  * Bit layout of `data` (32-bit):
@@ -1502,6 +1505,7 @@ static int emit_atomic_ld_st_index(u8 **pprog, u32 atomic_op, u32 size,
 #define FIXUP_INSN_LEN_MASK	GENMASK(7, 0)
 #define FIXUP_REG_MASK		GENMASK(15, 8)
 #define FIXUP_ARENA_REG_MASK	GENMASK(23, 16)
+#define FIXUP_ARENA_WRITE	BIT(30)
 #define FIXUP_ARENA_ACCESS	BIT(31)
 #define DATA_ARENA_OFFSET_MASK	GENMASK(31, 16)
 
@@ -1510,7 +1514,7 @@ bool ex_handler_bpf(const struct exception_table_entry *x, struct pt_regs *regs)
 	u32 reg = FIELD_GET(FIXUP_REG_MASK, x->fixup);
 	u32 insn_len = FIELD_GET(FIXUP_INSN_LEN_MASK, x->fixup);
 	bool is_arena = !!(x->fixup & FIXUP_ARENA_ACCESS);
-	bool is_write = (reg == DONT_CLEAR);
+	bool is_write = !!(x->fixup & FIXUP_ARENA_WRITE);
 	unsigned long addr;
 	s16 off;
 	u32 arena_reg;
@@ -1887,7 +1891,7 @@ static int do_jit(struct bpf_verifier_env *env, struct bpf_prog *bpf_prog, int *
 				EMIT_mov(dst_reg, src_reg);
 #ifdef CONFIG_SMP
 				/* add <dst>, gs:[<off>] */
-				EMIT2(0x65, add_1mod(0x48, dst_reg));
+				EMIT2(0x65, add_2mod(0x48, 0, dst_reg));
 				EMIT3(0x03, add_2reg(0x04, 0, dst_reg), 0x25);
 				EMIT((u32)(unsigned long)&this_cpu_off, 4);
 #endif
@@ -2304,6 +2308,7 @@ populate_extable:
 				struct exception_table_entry *ex;
 				u8 *_insn = image + proglen + (start_of_ldx - temp);
 				u32 arena_reg, fixup_reg;
+				bool is_write;
 				s64 delta;
 
 				if (!bpf_prog->aux->extable)
@@ -2331,19 +2336,38 @@ populate_extable:
 				 * BPF_PROBE_ATOMIC) before being used for the memory access. Pass
 				 * the reg holding the unmodified 32-bit address to
 				 * ex_handler_bpf().
+				 *
+				 * A load-acquire is of BPF_STX class, but reads from src_reg
+				 * into dst_reg like a BPF_LDX does, hence it must not be
+				 * treated as a store here.
 				 */
-				if (BPF_CLASS(insn->code) == BPF_LDX) {
+				if (BPF_CLASS(insn->code) == BPF_LDX ||
+				    bpf_atomic_is_load_acq(insn)) {
 					arena_reg = reg2pt_regs[src_reg];
 					fixup_reg = reg2pt_regs[dst_reg];
+					is_write = false;
 				} else {
+					/*
+					 * A store has no destination register to clear,
+					 * except for a read-modify-write with BPF_FETCH,
+					 * which also reads the old value into src_reg, or
+					 * into r0 for a BPF_CMPXCHG. Either way the access
+					 * is still reported as a write.
+					 */
+					int load_reg = bpf_atomic_load_reg(insn);
+
 					arena_reg = reg2pt_regs[dst_reg];
-					fixup_reg = DONT_CLEAR;
+					fixup_reg = load_reg < 0 ? DONT_CLEAR :
+						    reg2pt_regs[load_reg];
+					is_write = true;
 				}
 
 				ex->fixup = FIELD_PREP(FIXUP_INSN_LEN_MASK, prog - start_of_ldx) |
 					    FIELD_PREP(FIXUP_ARENA_REG_MASK, arena_reg) |
 					    FIELD_PREP(FIXUP_REG_MASK, fixup_reg);
 				ex->fixup |= FIXUP_ARENA_ACCESS;
+				if (is_write)
+					ex->fixup |= FIXUP_ARENA_WRITE;
 
 				ex->data |= FIELD_PREP(DATA_ARENA_OFFSET_MASK, insn->off);
 			}
@@ -3104,15 +3128,20 @@ static void restore_regs(const struct btf_func_model *m, u8 **prog,
 }
 
 static int invoke_bpf_prog(const struct btf_func_model *m, u8 **pprog,
+			   struct bpf_tramp_image *im,
 			   struct bpf_tramp_node *node, int stack_size,
 			   int run_ctx_off, bool save_ret,
 			   void *image, void *rw_image)
 {
 	u8 *prog = *pprog;
-	u8 *jmp_insn;
+	u8 *jmp_insn, *skip;
 	int ctx_cookie_off = offsetof(struct bpf_tramp_run_ctx, bpf_cookie);
 	struct bpf_prog *p = node->link->prog;
 	u64 cookie = node->cookie;
+
+	/* nop, patched to skip this prog when it is detached */
+	skip = image + (prog - (u8 *)rw_image);
+	emit_nops(&prog, X86_PATCH_SIZE);
 
 	/* mov rdi, cookie */
 	emit_mov_imm64(&prog, BPF_REG_1, (long) cookie >> 32, (u32) (long) cookie);
@@ -3188,6 +3217,8 @@ static int invoke_bpf_prog(const struct btf_func_model *m, u8 **pprog,
 	if (emit_rsb_call(&prog, bpf_trampoline_exit(p), image + (prog - (u8 *)rw_image)))
 		return -EINVAL;
 
+	bpf_tramp_image_add_skip(im, p, skip, image + (prog - (u8 *)rw_image));
+
 	*pprog = prog;
 	return 0;
 }
@@ -3219,6 +3250,7 @@ static int emit_cond_near_jump(u8 **pprog, void *func, void *ip, u8 jmp_cond)
 }
 
 static int invoke_bpf(const struct btf_func_model *m, u8 **pprog,
+		      struct bpf_tramp_image *im,
 		      struct bpf_tramp_nodes *tl, int stack_size,
 		      int run_ctx_off, int func_meta_off, bool save_ret,
 		      void *image, void *rw_image, u64 func_meta,
@@ -3233,7 +3265,7 @@ static int invoke_bpf(const struct btf_func_model *m, u8 **pprog,
 				func_meta | (cur_cookie << BPF_TRAMP_COOKIE_INDEX_SHIFT));
 			cur_cookie--;
 		}
-		if (invoke_bpf_prog(m, &prog, tl->nodes[i], stack_size,
+		if (invoke_bpf_prog(m, &prog, im, tl->nodes[i], stack_size,
 				    run_ctx_off, save_ret, image, rw_image))
 			return -EINVAL;
 	}
@@ -3242,6 +3274,7 @@ static int invoke_bpf(const struct btf_func_model *m, u8 **pprog,
 }
 
 static int invoke_bpf_mod_ret(const struct btf_func_model *m, u8 **pprog,
+			      struct bpf_tramp_image *im,
 			      struct bpf_tramp_nodes *tl, int stack_size,
 			      int run_ctx_off, u8 **branches,
 			      void *image, void *rw_image)
@@ -3255,7 +3288,7 @@ static int invoke_bpf_mod_ret(const struct btf_func_model *m, u8 **pprog,
 	emit_mov_imm32(&prog, false, BPF_REG_0, 0);
 	emit_stx(&prog, BPF_DW, BPF_REG_FP, BPF_REG_0, -8);
 	for (i = 0; i < tl->nr_nodes; i++) {
-		if (invoke_bpf_prog(m, &prog, tl->nodes[i], stack_size, run_ctx_off, true,
+		if (invoke_bpf_prog(m, &prog, im, tl->nodes[i], stack_size, run_ctx_off, true,
 				    image, rw_image))
 			return -EINVAL;
 
@@ -3369,11 +3402,8 @@ static int __arch_prepare_bpf_trampoline(struct bpf_tramp_image *im, void *rw_im
 	WARN_ON_ONCE((flags & BPF_TRAMP_F_INDIRECT) &&
 		     (flags & ~(BPF_TRAMP_F_INDIRECT | BPF_TRAMP_F_RET_FENTRY_RET)));
 
-	/* extra registers for struct arguments */
-	for (i = 0; i < m->nr_args; i++) {
-		if (m->arg_flags[i] & BTF_FMODEL_STRUCT_ARG)
-			nr_regs += (m->arg_size[i] + 7) / 8 - 1;
-	}
+	for (i = 0; i < m->nr_args; i++)
+		nr_regs += (m->arg_size[i] + 7) / 8 - 1;
 
 	/* x86-64 supports up to MAX_BPF_FUNC_ARGS arguments. 1-6
 	 * are passed through regs, the remains are through stack.
@@ -3527,7 +3557,7 @@ static int __arch_prepare_bpf_trampoline(struct bpf_tramp_image *im, void *rw_im
 	}
 
 	if (fentry->nr_nodes) {
-		if (invoke_bpf(m, &prog, fentry, regs_off, run_ctx_off, func_meta_off,
+		if (invoke_bpf(m, &prog, im, fentry, regs_off, run_ctx_off, func_meta_off,
 			       flags & BPF_TRAMP_F_RET_FENTRY_RET, image, rw_image,
 			       func_meta, cookie_off))
 			return -EINVAL;
@@ -3539,7 +3569,7 @@ static int __arch_prepare_bpf_trampoline(struct bpf_tramp_image *im, void *rw_im
 		if (!branches)
 			return -ENOMEM;
 
-		if (invoke_bpf_mod_ret(m, &prog, fmod_ret, regs_off,
+		if (invoke_bpf_mod_ret(m, &prog, im, fmod_ret, regs_off,
 				       run_ctx_off, branches, image, rw_image)) {
 			ret = -EINVAL;
 			goto cleanup;
@@ -3569,8 +3599,6 @@ static int __arch_prepare_bpf_trampoline(struct bpf_tramp_image *im, void *rw_im
 		}
 		/* remember return value in a stack for bpf prog to access */
 		emit_stx(&prog, BPF_DW, BPF_REG_FP, BPF_REG_0, -8);
-		im->ip_after_call = image + (prog - (u8 *)rw_image);
-		emit_nops(&prog, X86_PATCH_SIZE);
 	}
 
 	if (fmod_ret->nr_nodes) {
@@ -3595,7 +3623,7 @@ static int __arch_prepare_bpf_trampoline(struct bpf_tramp_image *im, void *rw_im
 		emit_store_stack_imm64(&prog, BPF_REG_0, -func_meta_off, func_meta);
 
 	if (fexit->nr_nodes) {
-		if (invoke_bpf(m, &prog, fexit, regs_off, run_ctx_off, func_meta_off,
+		if (invoke_bpf(m, &prog, im, fexit, regs_off, run_ctx_off, func_meta_off,
 			       false, image, rw_image, func_meta, cookie_off)) {
 			ret = -EINVAL;
 			goto cleanup;
@@ -3610,7 +3638,6 @@ static int __arch_prepare_bpf_trampoline(struct bpf_tramp_image *im, void *rw_im
 	 * restored to R0.
 	 */
 	if (flags & BPF_TRAMP_F_CALL_ORIG) {
-		im->ip_epilogue = image + (prog - (u8 *)rw_image);
 		/* arg1: mov rdi, im */
 		emit_mov_imm64(&prog, BPF_REG_1, (long) im >> 32, (u32) (long) im);
 		if (emit_rsb_call(&prog, __bpf_tramp_exit, image + (prog - (u8 *)rw_image))) {
@@ -3698,7 +3725,7 @@ out:
 int arch_bpf_trampoline_size(const struct btf_func_model *m, u32 flags,
 			     struct bpf_tramp_nodes *tnodes, void *func_addr)
 {
-	struct bpf_tramp_image im;
+	struct bpf_tramp_image im = {};
 	void *image;
 	int ret;
 

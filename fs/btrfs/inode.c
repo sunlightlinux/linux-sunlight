@@ -775,19 +775,28 @@ static inline void inode_should_defrag(struct btrfs_inode *inode,
 
 static int extent_range_clear_dirty_for_io(struct btrfs_inode *inode, u64 start, u64 end)
 {
+	pgoff_t index = start >> PAGE_SHIFT;
 	const pgoff_t end_index = end >> PAGE_SHIFT;
 	struct folio *folio;
 	int ret = 0;
 
-	for (pgoff_t index = start >> PAGE_SHIFT; index <= end_index; index++) {
+	while (index <= end_index) {
 		folio = filemap_get_folio(inode->vfs_inode.i_mapping, index);
 		if (IS_ERR(folio)) {
 			if (!ret)
 				ret = PTR_ERR(folio);
+			index++;
 			continue;
 		}
+		/*
+		 * We are about to compress the folio, so it must not be mmap
+		 * writeable or we could corrupt the data as we attempt to
+		 * compress it.
+		 */
+		btrfs_check_folio_write_protected(folio);
 		btrfs_folio_clamp_clear_dirty(inode->root->fs_info, folio, start,
 					      end + 1 - start);
+		index = folio_next_index(folio);
 		folio_put(folio);
 	}
 	return ret;
@@ -877,11 +886,6 @@ static void compress_file_range(struct btrfs_work *work)
 
 	inode_should_defrag(inode, start, end, end - start + 1, SZ_16K);
 
-	/*
-	 * We need to call clear_page_dirty_for_io on each page in the range.
-	 * Otherwise applications with the file mmap'd can wander in and change
-	 * the page contents while we are compressing them.
-	 */
 	ret = extent_range_clear_dirty_for_io(inode, start, end);
 
 	/*
@@ -2317,6 +2321,13 @@ static int run_delalloc_inline(struct btrfs_inode *inode, struct folio *locked_f
 	int ret;
 
 	ASSERT(folio_pos(locked_folio) == 0);
+	/*
+	 * If an mmap writer could modify the folio while we copy it into an
+	 * inline extent we might see only part of their modification then
+	 * wrongly mark it clean again after copying, losing that write. So the
+	 * folio must be write protected here.
+	 */
+	btrfs_check_folio_write_protected(locked_folio);
 
 	if (btrfs_inode_can_compress(inode) &&
 	    inode_need_compress(inode, 0, blocksize, true)) {
@@ -2327,12 +2338,27 @@ static int run_delalloc_inline(struct btrfs_inode *inode, struct folio *locked_f
 		} else if (inode->prop_compress) {
 			compress_type = inode->prop_compress;
 		}
+		/*
+		 * We need to pass blocksize and not i_size, otherwise we can't
+		 * create compressed inline extents for data smaller than sector
+		 * size with lzo.
+		 */
 		cb = btrfs_compress_bio(inode, 0, blocksize, compress_type, compress_level, 0);
 		if (IS_ERR(cb)) {
 			cb = NULL;
 			/* Just fall back to non-compressed case. */
 		} else {
 			compressed_size = cb->bbio.bio.bi_iter.bi_size;
+			/*
+			 * If we did not save space, it's pointless and wasteful
+			 * to have an inline compressed extent, so fallback to
+			 * an uncompressed inline extent.
+			 */
+			if (compressed_size >= i_size) {
+				cleanup_compressed_bio(cb);
+				cb = NULL;
+				compressed_size = 0;
+			}
 		}
 	}
 	if (!can_cow_file_range_inline(inode, 0, i_size, compressed_size)) {
@@ -3424,6 +3450,9 @@ out:
 	 */
 	btrfs_remove_ordered_extent(ordered_extent);
 
+	/* Cleanup any remaining biocs attached to the OE. */
+	btrfs_cleanup_ordered_bioc_list(ordered_extent);
+
 	/* once for us */
 	btrfs_put_ordered_extent(ordered_extent);
 	/* once for the tree */
@@ -3862,7 +3891,8 @@ int btrfs_orphan_cleanup(struct btrfs_root *root)
 				if (ret)
 					goto out;
 			}
-			trans = btrfs_start_transaction(root, 1);
+			/* Only deletes the orphan. */
+			trans = btrfs_start_transaction_fallback_global_rsv(root, 1);
 			if (IS_ERR(trans)) {
 				ret = PTR_ERR(trans);
 				goto out;
@@ -9592,7 +9622,6 @@ int btrfs_encoded_read_regular_fill_pages(struct btrfs_inode *inode,
 	struct completion sync_reads;
 	unsigned long i = 0;
 	struct btrfs_bio *bbio;
-	int ret;
 
 	/*
 	 * Fast path for synchronous reads which completes in this call, io_uring
@@ -9639,10 +9668,10 @@ int btrfs_encoded_read_regular_fill_pages(struct btrfs_inode *inode,
 
 	if (uring_ctx) {
 		if (refcount_dec_and_test(&priv->pending_refs)) {
-			ret = blk_status_to_errno(READ_ONCE(priv->status));
-			btrfs_uring_read_extent_endio(uring_ctx, ret);
+			int error = blk_status_to_errno(READ_ONCE(priv->status));
+
+			btrfs_uring_read_extent_endio(uring_ctx, error);
 			kfree(priv);
-			return ret;
 		}
 
 		return -EIOCBQUEUED;

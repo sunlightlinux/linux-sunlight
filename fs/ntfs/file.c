@@ -111,7 +111,8 @@ static int ntfs_trim_prealloc(struct inode *vi)
 			ntfs_error(vol->sb, "Preallocated block rollback failed");
 		} else {
 			ni->allocated_size = ntfs_cluster_to_bytes(vol, vcn_tr);
-			err = ntfs_attr_update_mapping_pairs(ni, 0);
+			err = ntfs_attr_update_mapping_pairs_locked(
+					ni, 0, ni);
 			if (err)
 				ntfs_error(vol->sb,
 					   "Failed to rollback mapping pairs for prealloc");
@@ -346,14 +347,12 @@ int ntfs_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 		if (ia_valid & ATTR_MODE)
 			flags |= NTFS_EA_MODE;
 
-		if (S_ISDIR(vi->i_mode))
-			vi->i_mode &= ~vol->dmask;
-		else
-			vi->i_mode &= ~vol->fmask;
-
 		mutex_lock(&ni->mrec_lock);
-		ntfs_ea_set_wsl_inode(vi, 0, NULL, flags);
+		err = ntfs_ea_set_wsl_inode(vi, 0, NULL, flags);
 		mutex_unlock(&ni->mrec_lock);
+		if (err)
+			goto out;
+
 	}
 
 	mark_inode_dirty(vi);

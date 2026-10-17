@@ -600,6 +600,8 @@ static int build_prologue(struct jit_ctx *ctx, bool ebpf_from_cbpf)
 		 * 12 registers are on the stack
 		 */
 		emit(A64_SUB_I(1, A64_SP, A64_FP, 96), ctx);
+		/* The callback may use its own BPF stack, set up fp for it. */
+		ctx->fp_used = true;
 	}
 
 	/* Stack must be multiples of 16B */
@@ -1082,23 +1084,27 @@ static void build_epilogue(struct jit_ctx *ctx, bool was_classic)
  *
  * Bit layout of `fixup` (32-bit):
  *
- * +-----------+--------+-----------+-----------+----------+
- * |   31-27   | 26-22  |     21    |   20-16   |   15-0   |
- * |           |        |           |           |          |
- * | FIXUP_REG | Unused | ARENA_ACC | ARENA_REG |  OFFSET  |
- * +-----------+--------+-----------+-----------+----------+
+ * +-----------+--------+-------------+-----------+-----------+----------+
+ * |   31-27   | 26-23  |      22     |     21    |   20-16   |   15-0   |
+ * |           |        |             |           |           |          |
+ * | FIXUP_REG | Unused | ARENA_WRITE | ARENA_ACC | ARENA_REG |  OFFSET  |
+ * +-----------+--------+-------------+-----------+-----------+----------+
  *
  * - OFFSET (16 bits): Offset used to compute address for Load/Store instruction.
  * - ARENA_REG (5 bits): Register that is used to calculate the address for load/store when
  *                       accessing the arena region.
  * - ARENA_ACCESS (1 bit): This bit is set when the faulting instruction accessed the arena region.
+ * - ARENA_WRITE (1 bit): This bit is set when the faulting instruction wrote to the arena region.
+ *                        It is independent of FIXUP_REG, since a read-modify-write both writes to
+ *                        memory and reads the old value into a register.
  * - FIXUP_REG (5 bits): Destination register for the load instruction (cleared on fault) or set to
- *                       DONT_CLEAR if it is a store instruction.
+ *                       DONT_CLEAR if the instruction does not read into a register.
  */
 
 #define BPF_FIXUP_OFFSET_MASK      GENMASK(15, 0)
 #define BPF_FIXUP_ARENA_REG_MASK   GENMASK(20, 16)
 #define BPF_ARENA_ACCESS           BIT(21)
+#define BPF_ARENA_WRITE            BIT(22)
 #define BPF_FIXUP_REG_MASK	GENMASK(31, 27)
 #define DONT_CLEAR 5 /* Unused ARM64 register from BPF's POV */
 
@@ -1109,7 +1115,7 @@ bool ex_handler_bpf(const struct exception_table_entry *ex,
 	s16 off = FIELD_GET(BPF_FIXUP_OFFSET_MASK, ex->fixup);
 	int arena_reg = FIELD_GET(BPF_FIXUP_ARENA_REG_MASK, ex->fixup);
 	bool is_arena = !!(ex->fixup & BPF_ARENA_ACCESS);
-	bool is_write = (dst_reg == DONT_CLEAR);
+	bool is_write = !!(ex->fixup & BPF_ARENA_WRITE);
 	unsigned long addr;
 
 	if (is_arena) {
@@ -1132,7 +1138,7 @@ static int add_exception_handler(const struct bpf_insn *insn,
 {
 	off_t ins_offset;
 	s16 off = insn->off;
-	bool is_arena;
+	bool is_arena, is_write;
 	int arena_reg;
 	unsigned long pc;
 	struct exception_table_entry *ex;
@@ -1178,13 +1184,21 @@ static int add_exception_handler(const struct bpf_insn *insn,
 
 	ex->insn = ins_offset;
 
-	if (BPF_CLASS(insn->code) != BPF_LDX)
-		dst_reg = DONT_CLEAR;
+	/*
+	 * A load-acquire is of BPF_STX class, but reads from src_reg into
+	 * dst_reg like a BPF_LDX does, hence it must not be treated as a store
+	 * here. A read-modify-write carrying BPF_FETCH is reported as a write
+	 * even though it does have a register to clear, see the callers.
+	 */
+	is_write = BPF_CLASS(insn->code) != BPF_LDX &&
+		   !bpf_atomic_is_load_acq(insn);
 
 	ex->fixup = FIELD_PREP(BPF_FIXUP_REG_MASK, dst_reg);
 
 	if (is_arena) {
 		ex->fixup |= BPF_ARENA_ACCESS;
+		if (is_write)
+			ex->fixup |= BPF_ARENA_WRITE;
 		/*
 		 * insn->src_reg/dst_reg holds the address in the arena region with upper 32-bits
 		 * being zero because of a preceding addr_space_cast(r<n>, 0x0, 0x1) instruction.
@@ -1193,7 +1207,7 @@ static int add_exception_handler(const struct bpf_insn *insn,
 		 * memory access. Pass the reg holding the unmodified 32-bit address to
 		 * ex_handler_bpf.
 		 */
-		if (BPF_CLASS(insn->code) == BPF_LDX)
+		if (BPF_CLASS(insn->code) == BPF_LDX || bpf_atomic_is_load_acq(insn))
 			arena_reg = bpf2a64[insn->src_reg];
 		else
 			arena_reg = bpf2a64[insn->dst_reg];
@@ -1871,7 +1885,7 @@ emit_cond_jmp:
 			break;
 		}
 
-		ret = add_exception_handler(insn, ctx, dst);
+		ret = add_exception_handler(insn, ctx, DONT_CLEAR);
 		if (ret)
 			return ret;
 		break;
@@ -1938,7 +1952,7 @@ emit_cond_jmp:
 			break;
 		}
 
-		ret = add_exception_handler(insn, ctx, dst);
+		ret = add_exception_handler(insn, ctx, DONT_CLEAR);
 		if (ret)
 			return ret;
 		break;
@@ -1961,7 +1975,16 @@ emit_cond_jmp:
 			return ret;
 
 		if (BPF_MODE(insn->code) == BPF_PROBE_ATOMIC) {
-			ret = add_exception_handler(insn, ctx, dst);
+			/*
+			 * A load-acquire reads into dst_reg, and a read-modify-write
+			 * carrying BPF_FETCH reads the old value into src_reg, or into
+			 * r0 for a BPF_CMPXCHG. Clear that register on fault, the
+			 * remaining atomics have no destination register.
+			 */
+			int load_reg = bpf_atomic_load_reg(insn);
+
+			ret = add_exception_handler(insn, ctx, load_reg < 0 ?
+						    DONT_CLEAR : bpf2a64[load_reg]);
 			if (ret)
 				return ret;
 		}
@@ -2335,10 +2358,11 @@ bool bpf_jit_supports_subprog_tailcalls(void)
 	return true;
 }
 
-static void invoke_bpf_prog(struct jit_ctx *ctx, struct bpf_tramp_node *node,
-			    int bargs_off, int retval_off, int run_ctx_off,
-			    bool save_ret)
+static void invoke_bpf_prog(struct jit_ctx *ctx, struct bpf_tramp_image *im,
+			    struct bpf_tramp_node *node, int bargs_off,
+			    int retval_off, int run_ctx_off, bool save_ret)
 {
+	void *skip;
 	__le32 *branch;
 	u64 enter_prog;
 	u64 exit_prog;
@@ -2347,6 +2371,10 @@ static void invoke_bpf_prog(struct jit_ctx *ctx, struct bpf_tramp_node *node,
 
 	enter_prog = (u64)bpf_trampoline_enter(p);
 	exit_prog = (u64)bpf_trampoline_exit(p);
+
+	/* nop, patched to skip this prog when it is detached */
+	skip = ctx->ro_image + ctx->idx;
+	emit(A64_NOP, ctx);
 
 	if (node->cookie == 0) {
 		/* if cookie is zero, one instruction is enough to store it */
@@ -2400,11 +2428,13 @@ static void invoke_bpf_prog(struct jit_ctx *ctx, struct bpf_tramp_node *node,
 	emit(A64_ADD_I(1, A64_R(2), A64_SP, run_ctx_off), ctx);
 
 	emit_call(exit_prog, ctx);
+
+	bpf_tramp_image_add_skip(im, p, skip, ctx->ro_image + ctx->idx);
 }
 
-static void invoke_bpf_mod_ret(struct jit_ctx *ctx, struct bpf_tramp_nodes *tn,
-			       int bargs_off, int retval_off, int run_ctx_off,
-			       __le32 **branches)
+static void invoke_bpf_mod_ret(struct jit_ctx *ctx, struct bpf_tramp_image *im,
+			       struct bpf_tramp_nodes *tn, int bargs_off,
+			       int retval_off, int run_ctx_off, __le32 **branches)
 {
 	int i;
 
@@ -2413,7 +2443,7 @@ static void invoke_bpf_mod_ret(struct jit_ctx *ctx, struct bpf_tramp_nodes *tn,
 	 */
 	emit(A64_STR64I(A64_ZR, A64_SP, retval_off), ctx);
 	for (i = 0; i < tn->nr_nodes; i++) {
-		invoke_bpf_prog(ctx, tn->nodes[i], bargs_off, retval_off,
+		invoke_bpf_prog(ctx, im, tn->nodes[i], bargs_off, retval_off,
 				run_ctx_off, true);
 		/* if (*(u64 *)(sp + retval_off) !=  0)
 		 *	goto do_fexit;
@@ -2491,9 +2521,8 @@ static void clear_garbage(struct jit_ctx *ctx, int reg, int effective_bytes)
 }
 
 static void save_args(struct jit_ctx *ctx, int bargs_off, int oargs_off,
-		      const struct btf_func_model *m,
-		      const struct arg_aux *a,
-		      bool for_call_origin)
+		      const struct btf_func_model *m, const struct arg_aux *a,
+		      bool for_call_origin, bool is_struct_ops)
 {
 	int i;
 	int reg;
@@ -2513,7 +2542,15 @@ static void save_args(struct jit_ctx *ctx, int bargs_off, int oargs_off,
 		bargs_off += 8;
 	}
 
-	soff = 32; /* on stack arguments start from FP + 32 */
+	/*
+	 * On-stack arguments start above the frame(s) pushed by the trampoline
+	 * prologue. Entered through the fentry call from a traced function, the
+	 * prologue saves both the parent (FP/x9) and the traced function
+	 * (FP/LR) frames, so the arguments start at FP + 32. A struct_ops
+	 * callback is called indirectly and only the FP/LR frame is saved, so
+	 * they start at FP + 16.
+	 */
+	soff = is_struct_ops ? 16 : 32;
 	doff = (for_call_origin ? oargs_off : bargs_off);
 
 	/* save on stack arguments */
@@ -2709,7 +2746,7 @@ static int prepare_trampoline(struct jit_ctx *ctx, struct bpf_tramp_image *im,
 	store_func_meta(ctx, func_meta, func_meta_off);
 
 	/* save args for bpf */
-	save_args(ctx, bargs_off, oargs_off, m, a, false);
+	save_args(ctx, bargs_off, oargs_off, m, a, false, is_struct_ops);
 
 	/* save callee saved registers */
 	emit(A64_STR64I(A64_R(19), A64_SP, regs_off), ctx);
@@ -2741,7 +2778,7 @@ static int prepare_trampoline(struct jit_ctx *ctx, struct bpf_tramp_image *im,
 			store_func_meta(ctx, meta, func_meta_off);
 			cookie_bargs_off--;
 		}
-		invoke_bpf_prog(ctx, fentry->nodes[i], bargs_off,
+		invoke_bpf_prog(ctx, im, fentry->nodes[i], bargs_off,
 				retval_off, run_ctx_off,
 				flags & BPF_TRAMP_F_RET_FENTRY_RET);
 	}
@@ -2752,22 +2789,19 @@ static int prepare_trampoline(struct jit_ctx *ctx, struct bpf_tramp_image *im,
 		if (!branches)
 			return -ENOMEM;
 
-		invoke_bpf_mod_ret(ctx, fmod_ret, bargs_off, retval_off,
+		invoke_bpf_mod_ret(ctx, im, fmod_ret, bargs_off, retval_off,
 				   run_ctx_off, branches);
 	}
 
 	if (flags & BPF_TRAMP_F_CALL_ORIG) {
 		/* save args for original func */
-		save_args(ctx, bargs_off, oargs_off, m, a, true);
+		save_args(ctx, bargs_off, oargs_off, m, a, true, is_struct_ops);
 		/* call original func */
 		emit(A64_LDR64I(A64_R(10), A64_SP, retaddr_off), ctx);
 		emit(A64_ADR(A64_LR, AARCH64_INSN_SIZE * 2), ctx);
 		emit(A64_RET(A64_R(10)), ctx);
 		/* store return value */
 		emit(A64_STR64I(A64_R(0), A64_SP, retval_off), ctx);
-		/* reserve a nop for bpf_tramp_image_put */
-		im->ip_after_call = ctx->ro_image + ctx->idx;
-		emit(A64_NOP, ctx);
 	}
 
 	/* update the branches saved in invoke_bpf_mod_ret with cbnz */
@@ -2789,12 +2823,11 @@ static int prepare_trampoline(struct jit_ctx *ctx, struct bpf_tramp_image *im,
 			store_func_meta(ctx, meta, func_meta_off);
 			cookie_bargs_off--;
 		}
-		invoke_bpf_prog(ctx, fexit->nodes[i], bargs_off, retval_off,
+		invoke_bpf_prog(ctx, im, fexit->nodes[i], bargs_off, retval_off,
 				run_ctx_off, false);
 	}
 
 	if (flags & BPF_TRAMP_F_CALL_ORIG) {
-		im->ip_epilogue = ctx->ro_image + ctx->idx;
 		/* for the first pass, assume the worst case */
 		if (!ctx->image)
 			ctx->idx += 4;
@@ -2853,7 +2886,7 @@ int arch_bpf_trampoline_size(const struct btf_func_model *m, u32 flags,
 		.image = NULL,
 		.idx = 0,
 	};
-	struct bpf_tramp_image im;
+	struct bpf_tramp_image im = {};
 	struct arg_aux aaux;
 	int ret;
 
@@ -3140,6 +3173,10 @@ int bpf_arch_text_poke(void *ip, enum bpf_text_poke_type old_t,
 	 *    longer reachable, since bpf_tramp_image_put() function already
 	 *    uses percpu_ref and task-based rcu to do the sync, no need to call
 	 *    the sync version here, see bpf_tramp_image_put() for details.
+	 *
+	 * 3. when a detached prog is patched out of a trampoline, a CPU that
+	 *    still executes the old nop calls the prog before it went through
+	 *    a quiescent state, and the prog is freed after grace periods.
 	 */
 	ret = aarch64_insn_patch_text_nosync(ip, new_insn);
 out:

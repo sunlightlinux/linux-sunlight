@@ -1583,6 +1583,8 @@ EXPORT_SYMBOL(path_has_submounts);
  *
  * Only one of d_invalidate() and d_set_mounted() must succeed.  For
  * this reason take rename_lock and d_lock on dentry and ancestors.
+ * Likewise for dont_mount() which marks a dentry that is being removed
+ * under d_lock.
  */
 int d_set_mounted(struct dentry *dentry)
 {
@@ -1599,7 +1601,7 @@ int d_set_mounted(struct dentry *dentry)
 		spin_unlock(&p->d_lock);
 	}
 	spin_lock(&dentry->d_lock);
-	if (!d_unlinked(dentry)) {
+	if (!d_unlinked(dentry) && !cant_mount(dentry)) {
 		ret = -EBUSY;
 		if (!d_mountpoint(dentry)) {
 			dentry->d_flags |= DCACHE_MOUNTED;
@@ -1794,7 +1796,12 @@ static void do_one_tree(struct dentry *dentry)
 {
 	shrink_dcache_tree(dentry, true);
 	d_walk(dentry, dentry, umount_check);
-	d_drop(dentry);
+	spin_lock(&dentry->d_lock);
+	__d_drop(dentry);
+	/* A busy root survives the dput() below so don't leave it on ->s_roots. */
+	if (unlikely(!hlist_unhashed(&dentry->d_sib)))
+		unlink_secondary_root(dentry);
+	spin_unlock(&dentry->d_lock);
 	dput(dentry);
 }
 
