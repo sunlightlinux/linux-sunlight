@@ -106,6 +106,7 @@ struct clocksource_hw_snapshot {
  * @wd_list:		List head to enqueue into the watchdog list (internal)
  * @cs_last:		Last clocksource value for clocksource watchdog
  * @wd_last:		Last watchdog value corresponding to @cs_last
+ * @wd_skewed:		Frequency skew seen in the last watchdog interval
  * @owner:		Module reference, must be set by clocksource in modules
  *
  * Note: This struct is not used in hotpathes of the timekeeping code
@@ -151,6 +152,7 @@ struct clocksource {
 	u64			cs_last;
 	u64			wd_last;
 	unsigned int		wd_cpu;
+	bool			wd_skewed;
 #endif
 	struct module		*owner;
 };
