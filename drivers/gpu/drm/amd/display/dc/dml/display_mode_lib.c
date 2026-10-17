@@ -139,6 +139,7 @@ const char *dml_get_status_message(enum dm_validation_status status)
 	case DML_FAIL_DIO_SUPPORT:                return "DIO support";
 	case DML_FAIL_NOT_ENOUGH_DSC:             return "Not enough DSC Units";
 	case DML_FAIL_DSC_CLK_REQUIRED:           return "DSC clock required";
+	case DML_FAIL_DSC_VALIDATION_FAILURE:     return "DSC validation failure";
 	case DML_FAIL_URGENT_LATENCY:             return "Urgent latency";
 	case DML_FAIL_REORDERING_BUFFER:          return "Re-ordering buffer";
 	case DML_FAIL_DISPCLK_DPPCLK:             return "Dispclk and Dppclk";
@@ -150,9 +151,18 @@ const char *dml_get_status_message(enum dm_validation_status status)
 	case DML_FAIL_CURSOR_SUPPORT:             return "Cursor support";
 	case DML_FAIL_PITCH_SUPPORT:              return "Pitch support";
 	case DML_FAIL_PTE_BUFFER_SIZE:            return "PTE buffer size";
+	case DML_FAIL_HOST_VM_IMMEDIATE_FLIP:     return "HostVM immediate flip";
 	case DML_FAIL_DSC_INPUT_BPC:              return "DSC input bpc";
 	case DML_FAIL_PREFETCH_SUPPORT:           return "Prefetch support";
 	case DML_FAIL_V_RATIO_PREFETCH:           return "Vertical ratio prefetch";
+	case DML_FAIL_P2I_WITH_420:               return "P2I with 420";
+	case DML_FAIL_DSC_ONLY_IF_NECESSARY_WITH_BPP: return "DSC only if necessary with bpp";
+	case DML_FAIL_NOT_DSC422_NATIVE:          return "DSC 422 native not supported";
+	case DML_FAIL_ODM_COMBINE4TO1:            return "ODM combine 4to1";
+	case DML_FAIL_ENOUGH_WRITEBACK_UNITS:     return "Not enough writeback units";
+	case DML_FAIL_VIEWPORT_EXCEEDS_SURFACE:   return "Viewport exceeds surface";
+	case DML_FAIL_DYNAMIC_METADATA:           return "Dynamic metadata";
+	case DML_FAIL_FMT_BUFFER_EXCEEDED:        return "FMT buffer exceeded";
 	default:                                  return "Unknown Status";
 	}
 }
