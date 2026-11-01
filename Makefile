@@ -5,10 +5,6 @@ SUBLEVEL = 1
 EXTRAVERSION =
 NAME = Baby Opossum Posse
 
-# TODO(b/575473148): temporarily report a fake v7.2-rc9 kernel version
-PATCHLEVEL = 2
-EXTRAVERSION = -rc9
-
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
 # More info can be located in ./README
