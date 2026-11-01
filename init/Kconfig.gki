@@ -123,7 +123,7 @@ config GKI_HIDDEN_X86_CONFIGS
 # drivers, so it is lower impact to disable IOMMU_IO_PGTABLE_LPAE here
 config GKI_HIDDEN_QCOM_CONFIGS
 	bool "Hidden QCOM configs needed for GKI"
-	select QCOM_SMEM_STATE
+	select QCOM_SMEM_STATE if (QCOM_SOC)
 	select QCOM_GDSC if (ARCH_QCOM)
 	select IOMMU_IO_PGTABLE_LPAE if (ARCH_QCOM && 64BIT)
 	select INTERCONNECT_QCOM if (ARCH_QCOM)
